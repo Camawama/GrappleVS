@@ -137,6 +137,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			SynchedEntityData.defineId(GrapplehookEntity.class, EntityDataSerializers.INT);
 	private static final EntityDataAccessor<Float> DATA_ROPE_LENGTH =
 			SynchedEntityData.defineId(GrapplehookEntity.class, EntityDataSerializers.FLOAT);
+	// mass (kg) of the attached VS ship (0 = none/unknown): the owning client decides from this
+	// whether the rope constrains the player or the ship yields instead
+	private static final EntityDataAccessor<Float> DATA_SHIP_MASS =
+			SynchedEntityData.defineId(GrapplehookEntity.class, EntityDataSerializers.FLOAT);
 
 	public int getSyncedAttachedEntityId() {
 		return this.entityData.get(DATA_ATTACHED_ENTITY);
@@ -144,6 +148,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 	public double getSyncedRopeLength() {
 		return this.entityData.get(DATA_ROPE_LENGTH);
+	}
+
+	public double getSyncedShipMass() {
+		return this.entityData.get(DATA_SHIP_MASS);
 	}
 
 	/** Ship id this hook is attached to, or -1. Safe to call without VS installed. */
@@ -173,6 +181,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
             data.writeDouble(0);
             data.writeDouble(0);
         }
+
+        // a client re-tracking an attached hook must not resume projectile simulation for it
+        // (client-side gravity would send the visual hook and rope through the floor)
+        data.writeBoolean(this.attached);
 	}
 
 	@Override
@@ -197,6 +209,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
             data.readDouble();
             data.readDouble();
         }
+
+        if (data.readBoolean()) {
+            this.setAttachPos(this.getX(), this.getY(), this.getZ());
+        }
 	}
 
 	@Override
@@ -204,6 +220,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		super.defineSynchedData();
 		this.entityData.define(DATA_ATTACHED_ENTITY, 0);
 		this.entityData.define(DATA_ROPE_LENGTH, 0.0F);
+		this.entityData.define(DATA_SHIP_MASS, 0.0F);
 	}
 
 	public void removeServer() {
@@ -228,6 +245,20 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			super.setPos(this.thisPos.x, this.thisPos.y, this.thisPos.z);
 		}
 
+		// attached hooks release when the owner gets absurdly far away (out of tracking range,
+		// where the rope isn't even rendered any more)
+		if (!this.level().isClientSide && this.attached && this.shootingEntity != null) {
+			double releaseDist = GrappleConfig.getConf().grapplinghook.other.hook_release_distance;
+			if (releaseDist > 0) {
+				double threshold = Math.max(releaseDist,
+						this.customization.maxlen + GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer);
+				if (Vec.positionVec(this.shootingEntity).sub(Vec.positionVec(this)).length() > threshold) {
+					this.serverRelease();
+					return;
+				}
+			}
+		}
+
 		if (!this.level().isClientSide && this.attached && this.attachedEntity != null) {
 			this.tickEntityAttachment();
 			if (this.isRemoved()) {
@@ -239,6 +270,9 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			this.setDeltaMovement(0, 0, 0);
 			if (GrapplemodUtils.vsLoaded()) {
 				boolean shipResolved = ValkyrienSkiesIntegration.updateShipAttachment(this, this.level());
+				if (!this.level().isClientSide && shipResolved) {
+					this.tickShipPull();
+				}
 				if (!this.level().isClientSide) {
 					if (!shipResolved) {
 						this.shipUnresolvedTicks++;
@@ -628,12 +662,89 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		ClientProxyInterface.proxy.updateGrappledControl(this, target);
 	}
 
-	private void detachFromEntity() {
+	/**
+	 * Rope tension on a Valkyrien Skies ship the hook is attached to. While the rope is taut, a
+	 * continuous force pulls the ship at the attach point toward the player (a hanging player's
+	 * weight, plus a spring term when the rope is stretched by reeling or falling). Mass decides
+	 * the outcome naturally: a one-block ship gets dragged along, a heavy hull barely moves and
+	 * the player swings from it instead.
+	 */
+	private void tickShipPull() {
+		if (this.shootingEntity == null) {
+			return;
+		}
+		long shipId = this.getAttachedShipId();
+		if (shipId == -1) {
+			return;
+		}
+		double mult = GrappleConfig.getConf().grapplinghook.other.hook_ship_pull_force;
+		if (mult <= 0) {
+			return;
+		}
+
+		// you can't pull the ship you're standing on (the rope would just be pulling yourself)
+		if (ValkyrienSkiesIntegration.isEntityStandingOnShip(this.level(), shipId, this.shootingEntity)) {
+			return;
+		}
+
+		Vec hookPos = Vec.positionVec(this);
+		Vec playerpos = Vec.positionVec(this.shootingEntity).add(new Vec(0, this.shootingEntity.getEyeHeight(), 0));
+		Vec ropevec = playerpos.sub(hookPos);
+		double dist = ropevec.length();
+		if (dist < 0.5) {
+			return;
+		}
+
+		// the client keeps r in sync (HookRopeLengthMessage); taut = at/beyond rope length
+		double excess = dist - this.r;
+		if (excess < -0.3) {
+			return;
+		}
+		// a grounded player only pulls when actively stretching the rope (walking away, reeling)
+		if (this.shootingEntity.onGround() && excess < 0.1) {
+			return;
+		}
+
+		// a player hauling on a rope, plus a spring while the rope is stretched (reeling/falling)
+		double tension = (3000.0 + Math.max(0, excess) * 6000.0);
+		tension = Math.min(tension, 30000.0) * mult;
+
+		Vec impulse = ropevec.changeLen(tension / 20.0); // one game tick's worth, N*s
+		Vec shipyardPos = new Vec(
+				this.getPersistentData().getDouble("vs_local_x"),
+				this.getPersistentData().getDouble("vs_local_y"),
+				this.getPersistentData().getDouble("vs_local_z"));
+		// full force at the attach point (a real rope): a pillar hooked at the top rights itself
+		// when lifted; the rotational damping keeps the off-center force from pumping up a spin
+		ValkyrienSkiesIntegration.queueShipImpulse(this.level(), shipId, impulse, shipyardPos, true);
+
+		// rope damper: bleed the ship's velocity relative to the player while the rope is taut.
+		// Without it the spring pumps energy every stretch-contract cycle (elastic pendulum
+		// resonance) and a light ship orbits the player faster and faster.
+		Vec shipVel = ValkyrienSkiesIntegration.getShipVelocity(this.level(), shipId);
+		if (shipVel != null) {
+			Vec playerVel = Vec.motionVec(this.shootingEntity).mult(20.0); // m/s
+			Vec relVel = shipVel.sub(playerVel);
+			if (relVel.length() > 0.5) {
+				double dampForce = Math.min(relVel.length() * 500.0, 12000.0) * mult;
+				Vec dampImpulse = relVel.changeLen(-dampForce / 20.0);
+				// at the center of mass: damping must not introduce torque of its own
+				ValkyrienSkiesIntegration.queueShipImpulse(this.level(), shipId, dampImpulse, null, false);
+			}
+		}
+	}
+
+	/** Releases any attachment (block, ship, or entity) server-side and removes the hook. */
+	private void serverRelease() {
 		this.entityData.set(DATA_ATTACHED_ENTITY, 0);
 		int ownerId = this.shootingEntityID;
 		GrapplemodUtils.sendToCorrectClient(new GrappleDetachMessage(ownerId), ownerId, this.level());
 		ServerControllerManager.attached.remove(ownerId);
 		this.removeServer();
+	}
+
+	private void detachFromEntity() {
+		this.serverRelease();
 	}
 
 	public void serverAttach(BlockPos blockpos, Vec pos, Direction sideHit) {
@@ -691,6 +802,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			Vec curpos = Vec.positionVec(this).add(nudge);
 			curpos.setPos(this);
 		} else {
+			// let the owning client know how heavy the ship is (rope constraint vs ship yielding)
+			this.entityData.set(DATA_SHIP_MASS,
+					(float) ValkyrienSkiesIntegration.getShipMass(this.level(), this.getPersistentData().getLong("vs_ship_id")));
+
 			// give the ship a small knock at the impact point, scaled by impact speed:
 			// light ships get visibly nudged, heavy ships barely notice
 			double impulseMult = GrappleConfig.getConf().grapplinghook.other.hook_ship_impulse;

@@ -8,8 +8,10 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
+import org.joml.Vector3dc;
 import org.valkyrienskies.core.api.events.PhysTickEvent;
 import org.valkyrienskies.core.api.ships.PhysShip;
+import org.valkyrienskies.core.api.ships.ServerShip;
 import org.valkyrienskies.core.api.ships.Ship;
 import org.valkyrienskies.mod.common.ValkyrienSkiesMod;
 import org.valkyrienskies.mod.common.VSGameUtilsKt;
@@ -155,25 +157,79 @@ public class ValkyrienSkiesIntegration {
         return new Vec(cur.x, cur.y, cur.z);
     }
 
+    /** Total mass (kg) of the ship, or 0 if it can't be resolved (server side only). */
+    public static double getShipMass(Level level, long shipId) {
+        Ship ship = getShipById(level, shipId);
+        if (ship instanceof ServerShip) {
+            return ((ServerShip) ship).getInertiaData().getShipMass();
+        }
+        return 0;
+    }
+
+    /**
+     * True when the entity is standing on the given ship (grounded and overlapping its world
+     * bounds). Used to stop a player from pulling the very ship they are standing on.
+     */
+    public static boolean isEntityStandingOnShip(Level level, long shipId, net.minecraft.world.entity.Entity entity) {
+        if (!entity.onGround()) {
+            return false;
+        }
+        Ship ship = getShipById(level, shipId);
+        if (ship == null) {
+            return false;
+        }
+        org.joml.primitives.AABBdc shipBox = ship.getWorldAABB();
+        net.minecraft.world.phys.AABB box = entity.getBoundingBox().inflate(0.6);
+        return box.minX <= shipBox.maxX() && box.maxX >= shipBox.minX()
+                && box.minY <= shipBox.maxY() + 0.5 && box.maxY >= shipBox.minY() - 0.5
+                && box.minZ <= shipBox.maxZ() && box.maxZ >= shipBox.minZ();
+    }
+
+    /** Current linear velocity (m/s) of the ship, or null if it can't be resolved. */
+    public static Vec getShipVelocity(Level level, long shipId) {
+        Ship ship = getShipById(level, shipId);
+        if (ship == null) {
+            return null;
+        }
+        Vector3dc v = ship.getVelocity();
+        return new Vec(v.x(), v.y(), v.z());
+    }
+
     // ---- hook impact impulses -------------------------------------------------------------
     // Impulses are queued on the game thread and applied on the physics thread via the global
     // phys-tick event (the only public force API in VS 2.4.x core).
 
-    private record QueuedImpulse(String dimensionId, long shipId, Vector3d impulseNs, Vector3d shipyardPos, long createdMs) {}
+    /** shipyardPos == null means: apply at the ship's center of mass (pure translation). */
+    private record QueuedImpulse(String dimensionId, long shipId, Vector3d impulseNs, Vector3d shipyardPos, boolean dampRotation, long createdMs) {}
 
     private static final ConcurrentLinkedQueue<QueuedImpulse> pendingImpulses = new ConcurrentLinkedQueue<>();
     private static final AtomicBoolean physListenerRegistered = new AtomicBoolean(false);
     private static final long IMPULSE_EXPIRY_MS = 5000;
 
-    /** Queues a world-space impulse (N&middot;s) at a shipyard-space position on the given ship. */
+    /**
+     * Queues a world-space impulse (N&middot;s) on the given ship. Applied at shipyardPos when
+     * given (imparts torque, like a real rope at an attach point), or at the center of mass when
+     * shipyardPos is null (pure translation).
+     */
     public static void queueShipImpulse(Level level, long shipId, Vec worldImpulseNs, Vec shipyardPos) {
+        queueShipImpulse(level, shipId, worldImpulseNs, shipyardPos, false);
+    }
+
+    /**
+     * As above; dampRotation additionally bleeds off a slice of the ship's angular momentum on
+     * the same physics tick. A force at an off-center attach point with no damping pumps spin
+     * (the point whirls, the force direction chases the player) until the ship tumbles and
+     * orbits; damping while the rope pulls turns that into a settled hang / upright pendulum.
+     */
+    public static void queueShipImpulse(Level level, long shipId, Vec worldImpulseNs, Vec shipyardPos, boolean dampRotation) {
         if (physListenerRegistered.compareAndSet(false, true)) {
             ValkyrienSkiesMod.getVsCore().getPhysTickEvent().on(ValkyrienSkiesIntegration::onPhysTick);
         }
         pendingImpulses.add(new QueuedImpulse(
                 VSGameUtilsKt.getDimensionId(level), shipId,
                 new Vector3d(worldImpulseNs.x, worldImpulseNs.y, worldImpulseNs.z),
-                new Vector3d(shipyardPos.x, shipyardPos.y, shipyardPos.z),
+                shipyardPos == null ? null : new Vector3d(shipyardPos.x, shipyardPos.y, shipyardPos.z),
+                dampRotation,
                 System.currentTimeMillis()));
     }
 
@@ -197,12 +253,23 @@ public class ValkyrienSkiesIntegration {
                 continue;
             }
             double delta = event.getDelta();
-            if (delta <= 0) {
+            // guard against surprising delta semantics (0, ticks instead of seconds, ...)
+            if (delta < 1.0 / 240.0 || delta > 1.0 / 20.0) {
                 delta = 1.0 / 60.0;
             }
             // impulse (N*s) -> force applied over exactly one physics step
             Vector3d force = new Vector3d(qi.impulseNs()).mul(1.0 / delta);
-            physShip.applyWorldForceToModelPos(force, qi.shipyardPos());
+            if (qi.shipyardPos() != null) {
+                physShip.applyWorldForceToModelPos(force, qi.shipyardPos());
+            } else {
+                physShip.applyInvariantForce(force);
+            }
+
+            if (qi.dampRotation()) {
+                // shed ~8% of the angular momentum this physics step (settles in ~0.5s at 60 Hz)
+                Vector3d angularMomentum = physShip.getMomentOfInertia().transform(new Vector3d(physShip.getOmega()));
+                physShip.applyInvariantTorque(angularMomentum.mul(-0.08 / delta));
+            }
         }
     }
 

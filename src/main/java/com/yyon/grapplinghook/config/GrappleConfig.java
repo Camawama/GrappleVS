@@ -248,6 +248,12 @@ public class GrappleConfig implements ConfigData {
 				public double hook_entity_retract_speed = 0.4;
 				@Tooltip
 				public double hook_ship_impulse = 1;
+				@Tooltip
+				public double hook_ship_pull_force = 1;
+				@Tooltip
+				public double hook_ship_anchor_mass = 4000;
+				@Tooltip
+				public double hook_release_distance = 96;
 			}
 		}
 		

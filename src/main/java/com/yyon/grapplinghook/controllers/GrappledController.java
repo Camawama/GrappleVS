@@ -35,7 +35,9 @@ public class GrappledController extends GrappleController {
 		// keeps the momentum smoothing after release, like a normal rope release.
 		if (ClientProxyInterface.proxy.unregisterController(this.entityId) != null) {
 			this.attached = false;
-			ClientProxyInterface.proxy.createControl(GrapplemodUtils.AIRID, -1, this.entityId, this.entity.level(), new Vec(0, 0, 0), null, this.custom);
+			if (!isFlying(this.entity)) {
+				ClientProxyInterface.proxy.createControl(GrapplemodUtils.AIRID, -1, this.entityId, this.entity.level(), new Vec(0, 0, 0), null, this.custom);
+			}
 		}
 	}
 

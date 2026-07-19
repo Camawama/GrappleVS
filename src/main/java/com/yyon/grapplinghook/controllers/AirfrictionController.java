@@ -49,6 +49,13 @@ public class AirfrictionController extends GrappleController {
 			this.updateServerPos();
 			return;
 		}
+
+		// creative flight owns movement; this controller's gravity would drag the player down
+		if (isFlying(entity)) {
+			motion = Vec.motionVec(entity);
+			this.unattach();
+			return;
+		}
 		
 		// allows safe releasing of grapple when on a ladder
 		if(entity instanceof LivingEntity living && living.onClimbable()) {

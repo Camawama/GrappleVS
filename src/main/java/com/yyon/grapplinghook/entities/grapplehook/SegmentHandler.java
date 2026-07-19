@@ -112,6 +112,22 @@ public class SegmentHandler {
 		segments.set(segments.size() - 1, playerpos);
 		this.ropeLen = ropelen;
 
+		// stale-bend prune: rope dragging across surfaces (flat-ground block seams, a rolling
+		// ship's ground contact) leaves bends the unwrap plane test never releases. A bend the
+		// rope passes straight through, or whose neighbours can see each other again, is stale.
+		for (int i = 1; i < segments.size() - 1; ) {
+			Vec bend = segments.get(i);
+			Vec toPrev = segments.get(i - 1).sub(bend);
+			Vec toNext = segments.get(i + 1).sub(bend);
+			boolean degenerate = toPrev.length() > 0.01 && toNext.length() > 0.01
+					&& toPrev.normalize().dot(toNext.normalize()) < -0.995;
+			if (degenerate
+					|| GrapplemodUtils.rayTraceBlocks(this.world, segments.get(i - 1), segments.get(i + 1)) == null) {
+				this.removeSegment(i);
+			} else {
+				i++;
+			}
+		}
 
 		Vec closest = segments.get(segments.size()-2);
 
@@ -275,6 +291,14 @@ public class SegmentHandler {
 					if (GrapplemodUtils.vsLoaded()) {
 						cornerShipId = ValkyrienSkiesIntegration.getShipIdManaging(this.world, cornerraytraceresult.getBlockPos());
 					}
+
+					// ship-relative sweeps (prev endpoints glued to the ship) exaggerate motion
+					// when the ship rotates; corners they find on OTHER surfaces (e.g. the ground
+					// under a rolling ship) are artifacts of that exaggeration, not real wraps
+					if (bottomShipId != NO_SHIP && cornerShipId != bottomShipId) {
+						continue;
+					}
+
 					Vec cornernormal = this.getWorldNormal(cornerside, cornerShipId);
 
 					// world-space parallelism check: on rotated ships the corner face can be
@@ -288,6 +312,13 @@ public class SegmentHandler {
 						Vec bend = actualcorner.add(bottomnormal.changeLen(bendOffset)).add(cornernormal.changeLen(bendOffset));
 						Vec topropevec = bend.sub(top);
 						Vec bottomropevec = bend.sub(bottom);
+
+						// don't create a bend the rope would pass straight through (flat-ground
+						// block seams produce these while the rope drags along the surface)
+						if (topropevec.length() > 0.01 && bottomropevec.length() > 0.01
+								&& topropevec.normalize().dot(bottomropevec.normalize()) < -0.995) {
+							continue;
+						}
 
 						// ignore bends that are too close to another bend
 						if (topropevec.length() < 0.05) {

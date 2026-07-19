@@ -31,6 +31,7 @@ import com.yyon.grapplinghook.network.GrappleAttachPosMessage;
 import com.yyon.grapplinghook.network.GrappleDetachMessage;
 import com.yyon.grapplinghook.network.GrappleEndMessage;
 import com.yyon.grapplinghook.network.GrappleModifierMessage;
+import com.yyon.grapplinghook.network.HookRopeLengthMessage;
 import com.yyon.grapplinghook.network.KeypressMessage;
 import com.yyon.grapplinghook.network.LoggedInMessage;
 import com.yyon.grapplinghook.network.PlayerMovementMessage;
@@ -108,7 +109,8 @@ public class CommonSetup {
 
 	// 2.0: SegmentMessage and GrappleAttachMessage carry per-bend ship data
 	// 2.1: added GrappleItemCustomizationMessage (in-hand hook customization)
-	public static final String NETWORK_PROTOCOL_VERSION = "2.1";
+	// 2.2: added HookRopeLengthMessage (server-side rope length sync for ship pulling)
+	public static final String NETWORK_PROTOCOL_VERSION = "2.2";
 
 	@SubscribeEvent
 	public static void init(FMLCommonSetupEvent event) {
@@ -129,6 +131,7 @@ public class CommonSetup {
 		network.registerMessage(id++, SegmentMessage.class, SegmentMessage::encode, SegmentMessage::new, SegmentMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
 		network.registerMessage(id++, LoggedInMessage.class, LoggedInMessage::encode, LoggedInMessage::new, LoggedInMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
 		network.registerMessage(id++, GrappleItemCustomizationMessage.class, GrappleItemCustomizationMessage::encode, GrappleItemCustomizationMessage::new, GrappleItemCustomizationMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_SERVER));
+		network.registerMessage(id++, HookRopeLengthMessage.class, HookRopeLengthMessage::encode, HookRopeLengthMessage::new, HookRopeLengthMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_SERVER));
 	}
 	
 
@@ -137,6 +140,9 @@ public class CommonSetup {
 
 	public static RegistryObject<EntityType<GrapplehookEntity>> grapplehookEntityType = ENTITY_TYPES.register("grapplehook", ()->EntityType.Builder.<GrapplehookEntity>of(GrapplehookEntity::new, MobCategory.MISC)
 			.sized(0.25F, 0.25F)
+			// 8 chunks: the rope must stay visible out to hook_release_distance (96 blocks),
+			// otherwise there's a dead zone where the rope is invisible but still attached
+			.clientTrackingRange(8)
 			.build("grapplemod:grapplehook"));
 
 

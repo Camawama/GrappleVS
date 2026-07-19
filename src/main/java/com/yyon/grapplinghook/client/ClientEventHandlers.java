@@ -163,7 +163,11 @@ public class ClientEventHandlers {
 			control.receivePlayerMovementMessage(input.leftImpulse, input.forwardImpulse, input.jumping, input.shiftKeyDown);
 
 			boolean overrideMovement = true;
-			if (Minecraft.getInstance().player.onGround()) {
+			// creative flight owns movement completely; the controller is passive while flying
+			// (rope pays out, no constraint), so vanilla flight must keep its WASD input
+			if (player.getAbilities().flying) {
+				overrideMovement = false;
+			} else if (Minecraft.getInstance().player.onGround()) {
 				if (!(control instanceof AirfrictionController) && !(control instanceof ForcefieldController)) {
 					overrideMovement = false;
 				}

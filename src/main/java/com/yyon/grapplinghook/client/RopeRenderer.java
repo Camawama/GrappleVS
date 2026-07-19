@@ -20,14 +20,24 @@ public class RopeRenderer {
     public static final ResourceLocation ROPE_TEXTURES = new ResourceLocation("grapplemod", "textures/entity/rope.png");
     public static final RenderType ROPE_RENDER = RenderType.entitySolid(ROPE_TEXTURES);
 
-    /** Draw one rope span from start to finish (both relative to the current pose origin). */
+    /**
+     * Draw one rope span from start to finish (both relative to the current pose origin), with
+     * the grappling hook's historical taut semantics: sag depth = (1 - taut) * 0.375 blocks.
+     */
     public static void drawSegment(Vec start, Vec finish, double taut, VertexConsumer vertexbuffer, Matrix4f matrix, Matrix3f matrix3, int light) {
+        drawSegmentSag(start, finish, (1 - taut) * 0.375, vertexbuffer, matrix, matrix3, light);
+    }
+
+    /** Draw one rope span with an explicit mid-span sag depth in blocks. */
+    public static void drawSegmentSag(Vec start, Vec finish, double sagDepth, VertexConsumer vertexbuffer, Matrix4f matrix, Matrix3f matrix3, int light) {
         if (start.sub(finish).length() < 0.05) {
             return;
         }
+        // 0.375 is the depth the (frac-based) parabola below evaluates to at mid-span per unit
+        double taut = 1 - Math.max(0, sagDepth) / 0.375;
 
         int number_squares = 16;
-        if (taut == 1.0F) {
+        if (sagDepth <= 0.001) {
             number_squares = 1;
         }
 

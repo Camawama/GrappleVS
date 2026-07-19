@@ -52,6 +52,18 @@ public class GrappleController {
 	// creative flight; the rope jump waits out vanilla's double-tap window before firing
 	int pendingRopeJumpTicks = 0;
 
+	// last rope length reported to the server per hook (ship pulling needs a current r)
+	private final java.util.HashMap<Integer, Double> lastSentRopeLen = new java.util.HashMap<>();
+
+	/** The client owns r while swinging (climb/reel); mirror meaningful changes to the server. */
+	protected void syncRopeLength(GrapplehookEntity hookEntity) {
+		Double last = this.lastSentRopeLen.get(hookEntity.getId());
+		if (last == null || Math.abs(hookEntity.r - last) > 0.1) {
+			this.lastSentRopeLen.put(hookEntity.getId(), hookEntity.r);
+			CommonSetup.network.sendToServer(new com.yyon.grapplinghook.network.HookRopeLengthMessage(hookEntity.getId(), hookEntity.r));
+		}
+	}
+
 	public double maxLen;
 
 	public double playerMovementMult = 0;
@@ -117,9 +129,17 @@ public class GrappleController {
 
 			if (this.controllerId != GrapplemodUtils.AIRID) {
 				CommonSetup.network.sendToServer(new GrappleEndMessage(this.entityId, this.grapplehookEntityIds));
-				ClientProxyInterface.proxy.createControl(GrapplemodUtils.AIRID, -1, this.entityId, this.entity.level(), new Vec(0,0,0), null, this.custom);
+				// no air controller while flying: it applies gravity every tick, which reads as
+				// being kicked out of creative flight the moment the rope is released
+				if (!isFlying(this.entity)) {
+					ClientProxyInterface.proxy.createControl(GrapplemodUtils.AIRID, -1, this.entityId, this.entity.level(), new Vec(0,0,0), null, this.custom);
+				}
 			}
 		}
+	}
+
+	protected static boolean isFlying(Entity entity) {
+		return entity instanceof Player && ((Player) entity).getAbilities().flying;
 	}
 
 
@@ -170,11 +190,14 @@ public class GrappleController {
 							}
 							Vec anchor = hookEntity.segmentHandler.getClosest(hookPos);
 							double distToHook = flyingplayerpos.sub(anchor).length();
+							// ship-attached ropes stay at their length while flying so tension
+							// builds and pulls the ship; other ropes pay out to avoid a snap
 							double needed = hookEntity.segmentHandler.getDistToAnchor() + distToHook;
-							if (needed > hookEntity.r) {
+							if (needed > hookEntity.r && hookEntity.getAttachedShipId() == -1) {
 								hookEntity.r = needed;
 							}
 							this.calcTaut(distToHook, hookEntity);
+							this.syncRopeLength(hookEntity);
 						}
 						this.motion = Vec.motionVec(entity);
 						this.updateServerPos();
@@ -251,9 +274,15 @@ public class GrappleController {
 							hookEntity.r = distToAnchor + oldspherevec.length();
 						}
 
+						// a light VS ship yields to the rope instead of anchoring the player: no
+						// constraint on the player (the server-side rope tension moves the ship)
+						double shipMass = hookEntity.getSyncedShipMass();
+						boolean lightShip = hookEntity.getAttachedShipId() != -1 && shipMass > 0
+								&& shipMass < GrappleConfig.getConf().grapplinghook.other.hook_ship_anchor_mass;
+
 						// a hook on a moving ship can outrun the player: pay out rope (up to maxlen)
 						// instead of instantly snapping
-						if (hookEntity.getAttachedShipId() != -1
+						if (hookEntity.getAttachedShipId() != -1 && !lightShip
 								&& oldspherevec.length() - remaininglength > GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
 							double needed = distToAnchor + oldspherevec.length();
 							double cap = Math.max(this.maxLen, hookEntity.r);
@@ -267,7 +296,15 @@ public class GrappleController {
 						}
 
 						// snap to rope length
-						if (oldspherevec.length() < remaininglength) {
+						if (lightShip) {
+							// the rope stretches instead of constraining; only give up when the
+							// stretch is far beyond anything the tension could recover from
+							if (oldspherevec.length() - remaininglength > GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer * 3) {
+								this.unattach();
+								this.updateServerPos();
+								return;
+							}
+						} else if (oldspherevec.length() < remaininglength) {
 						} else {
 							if (oldspherevec.length() - remaininglength > GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
 								// if rope is too long, the rope snaps
@@ -360,10 +397,12 @@ public class GrappleController {
 							close = true;
 						}
 
-						// swing along max rope length
-						if (anchor.sub(playerpos.add(motion)).length() > remaininglength) { // moving away
+						// swing along max rope length (a light ship yields instead of anchoring)
+						if (!lightShip && anchor.sub(playerpos.add(motion)).length() > remaininglength) { // moving away
 							motion = motion.removeAlong(spherevec);
 						}
+
+						this.syncRopeLength(hookEntity);
 					}
 					averagemotiontowards.changeLen_ip(1);
 
