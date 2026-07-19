@@ -19,8 +19,9 @@ ship hulls, and pay out rope when a hooked ship pulls away.
   re-projected every tick, so ropes follow moving/rotating ships.
 - If a hooked ship moves away, rope is paid out up to the hook's max rope length before the rope snaps.
 - If the ship a hook is attached to unloads or is deleted, the hook detaches after a few seconds.
-- Known limitation: rope-bend *unwrap* math treats bend edges as world-axis-aligned, so ropes
-  wrapped around heavily rotated ships may unwrap slightly early or late.
+- Rope-bend math uses the ship's current transform, so wrapping and unwrapping work on ships at
+  any rotation, and ships moving or rotating into a stationary rope catch it.
+- Hook impacts apply a small impulse to ships at the hit point (configurable: `hook_ship_impulse`).
 
 ## Setup for Developing
 

@@ -242,6 +242,12 @@ public class GrappleConfig implements ConfigData {
 				public double rope_jump_cooldown_s = 0;
 				@Tooltip
 				public double climb_speed = 0.3;
+				@Tooltip
+				public double hook_entity_damage = 3;
+				@Tooltip
+				public double hook_entity_retract_speed = 0.4;
+				@Tooltip
+				public double hook_ship_impulse = 1;
 			}
 		}
 		

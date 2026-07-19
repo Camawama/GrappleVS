@@ -48,6 +48,10 @@ public class GrappleController {
 	public int onGroundTimer = 0;
 	public int maxOnGroundTimer = 3;
 
+	// a mid-air space press by a player who can fly might be half of a double-tap to toggle
+	// creative flight; the rope jump waits out vanilla's double-tap window before firing
+	int pendingRopeJumpTicks = 0;
+
 	public double maxLen;
 
 	public double playerMovementMult = 0;
@@ -150,6 +154,33 @@ public class GrappleController {
 						return;
 					}
 
+					// creative flight: stay attached, but let vanilla flight drive the player.
+					// Rope physics, snapping, and space-detach are suspended; rope length pays
+					// out so leaving flight doesn't yank the player back.
+					if (entity instanceof Player && ((Player) entity).getAbilities().flying) {
+						this.pendingRopeJumpTicks = 0; // the space press toggled flight, not a rope jump
+						playerJump = ClientProxyInterface.proxy.isKeyDown(ClientProxyInterface.GrappleKeys.key_jumpanddetach);
+						Vec flyingplayerpos = Vec.positionVec(entity).add(new Vec(0, entity.getEyeHeight(), 0));
+						for (GrapplehookEntity hookEntity : this.grapplehookEntities) {
+							Vec hookPos = Vec.positionVec(hookEntity);
+							if (this.custom.phaserope) {
+								hookEntity.segmentHandler.updatePos(hookPos, flyingplayerpos, hookEntity.r);
+							} else {
+								hookEntity.segmentHandler.update(hookPos, flyingplayerpos, hookEntity.r, false);
+							}
+							Vec anchor = hookEntity.segmentHandler.getClosest(hookPos);
+							double distToHook = flyingplayerpos.sub(anchor).length();
+							double needed = hookEntity.segmentHandler.getDistToAnchor() + distToHook;
+							if (needed > hookEntity.r) {
+								hookEntity.r = needed;
+							}
+							this.calcTaut(distToHook, hookEntity);
+						}
+						this.motion = Vec.motionVec(entity);
+						this.updateServerPos();
+						return;
+					}
+
 					this.normalGround(false);
 					this.normalCollisions(false);
 					this.applyAirFriction();
@@ -183,6 +214,15 @@ public class GrappleController {
 					Vec averagemotiontowards = new Vec(0, 0, 0);
 
 					double min_spherevec_dist = 99999;
+
+					// countdown for a rope jump deferred past the creative double-tap window
+					boolean deferredJumpReady = false;
+					if (this.pendingRopeJumpTicks > 0) {
+						this.pendingRopeJumpTicks--;
+						if (this.pendingRopeJumpTicks == 0) {
+							deferredJumpReady = true;
+						}
+					}
 
 					for (GrapplehookEntity hookEntity : this.grapplehookEntities) {
 						Vec hookPos = Vec.positionVec(hookEntity);
@@ -258,10 +298,20 @@ public class GrappleController {
 								} else {
 									double timer = ClientProxyInterface.proxy.getTimeSinceLastRopeJump(this.entity.level());
 									if (timer > GrappleConfig.getConf().grapplinghook.other.rope_jump_cooldown_s * 20.0) {
-										doJump = true;
-										jumpSpeed = this.getJumpPower(player, spherevec, hookEntity);
+										if (player.getAbilities().mayfly && !player.getAbilities().flying) {
+											// might be half of a double-tap to start flying: wait it out
+											this.pendingRopeJumpTicks = 8;
+										} else {
+											doJump = true;
+											jumpSpeed = this.getJumpPower(player, spherevec, hookEntity);
+										}
 									}
 								}
+							}
+							if (deferredJumpReady) {
+								// no flight toggle arrived within the double-tap window: jump now
+								doJump = true;
+								jumpSpeed = this.getJumpPower(player, spherevec, hookEntity);
 							}
 							if (ClientProxyInterface.proxy.isKeyDown(ClientProxyInterface.GrappleKeys.key_slow)) {
 								// slow down

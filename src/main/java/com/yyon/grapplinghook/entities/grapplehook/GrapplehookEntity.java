@@ -122,6 +122,12 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 	private static final int SHIP_UNRESOLVED_DETACH_TICKS = 60;
 	private int shipUnresolvedTicks = 0;
 
+	// lead-style entity attachment: the hook clings to this entity and follows it (server only)
+	public Entity attachedEntity = null;
+	private static final double ENTITY_ATTACH_MIN_ROPE = 2.0;
+	// equivalent hook mass (kg) used to convert impact speed into a ship impulse
+	private static final double HOOK_IMPULSE_MASS_KG = 15.0;
+
 	/** Ship id this hook is attached to, or -1. Safe to call without VS installed. */
 	public long getAttachedShipId() {
 		return this.getPersistentData().contains("vs_ship_id") ? this.getPersistentData().getLong("vs_ship_id") : -1;
@@ -200,6 +206,13 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			this.setDeltaMovement(0, 0, 0);
 			this.firstAttach = false;
 			super.setPos(this.thisPos.x, this.thisPos.y, this.thisPos.z);
+		}
+
+		if (!this.level().isClientSide && this.attached && this.attachedEntity != null) {
+			this.tickEntityAttachment();
+			if (this.isRemoved()) {
+				return;
+			}
 		}
 
 		if (this.attached) {
@@ -419,21 +432,22 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			}
 
 			if (movingobjectposition instanceof EntityHitResult) {
-				// hit entity
+				// hit entity: damage it and cling to it like a lead
 				EntityHitResult entityHit = (EntityHitResult) movingobjectposition;
 				Entity entity = entityHit.getEntity();
 				if (entity == this.shootingEntity || entity == null) {
 					return;
 				}
+				if (entity instanceof GrapplehookEntity) {
+					return;
+				}
 
-				Vec playerpos = Vec.positionVec(this.shootingEntity);
-				Vec entitypos = Vec.positionVec(entity);
-				Vec yank = playerpos.sub(entitypos).mult(0.4);
-				yank.y = Math.min(yank.y, 2);
-				Vec newmotion = Vec.motionVec(entity).add(yank);
-				entity.setDeltaMovement(newmotion.toVec3d());
+				float damage = (float) GrappleConfig.getConf().grapplinghook.other.hook_entity_damage;
+				if (damage > 0) {
+					entity.hurt(this.damageSources().thrown(this, this.shootingEntity), damage);
+				}
 
-				this.removeServer();
+				this.serverAttachToEntity(entity);
 				return;
 			} else if (blockhit != null) {
 				BlockPos blockpos = blockhit.getBlockPos();
@@ -452,6 +466,91 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		return CommonSetup.grapplingHookItem.get();
 	}
 
+	/** Point on an entity the hook visually clings to. */
+	private Vec hookPointOn(Entity target) {
+		return new Vec(target.getX(), target.getY() + target.getBbHeight() * 0.6, target.getZ());
+	}
+
+	/**
+	 * Attaches the hook to an entity, lead-style: the hook follows the entity, the rope drags the
+	 * entity along when the player walks out of rope range, and crouching reels the entity in.
+	 * The owning player is not rope-constrained (no client controller is created).
+	 */
+	public void serverAttachToEntity(Entity target) {
+		if (this.attached) {
+			return;
+		}
+		if (this.shootingEntity == null || this.shootingEntityID == 0) {
+			return;
+		}
+		this.attached = true;
+		this.attachedEntity = target;
+
+		Vec pos = this.hookPointOn(target);
+		this.setPosRaw(pos.x, pos.y, pos.z);
+		this.setDeltaMovement(0, 0, 0);
+		this.thisPos = pos;
+		this.firstAttach = true;
+
+		Vec playerpos = Vec.positionVec(this.shootingEntity).add(new Vec(0, this.shootingEntity.getEyeHeight(), 0));
+		double dist = playerpos.sub(pos).length();
+		this.r = Math.min(Math.max(dist, ENTITY_ATTACH_MIN_ROPE), this.customization.maxlen);
+
+		ServerControllerManager.attached.add(this.shootingEntityID);
+
+		// pin the hook onto the entity for every nearby client; hook position afterwards flows
+		// through normal entity tracking as the hook follows its target
+		GrappleAttachPosMessage msg = new GrappleAttachPosMessage(this.getId(), pos.x, pos.y, pos.z);
+		CommonSetup.network.send(PacketDistributor.TRACKING_CHUNK.with(() -> this.level().getChunkAt(BlockPos.containing(pos.x, pos.y, pos.z))), msg);
+	}
+
+	/** Server tick while clinging to an entity: follow it and apply the lead-rope pull. */
+	private void tickEntityAttachment() {
+		Entity target = this.attachedEntity;
+		if (target == null || !target.isAlive() || this.shootingEntity == null) {
+			this.detachFromEntity();
+			return;
+		}
+
+		Vec pos = this.hookPointOn(target);
+		this.setPos(pos.x, pos.y, pos.z);
+		this.thisPos = pos;
+
+		Vec playerpos = Vec.positionVec(this.shootingEntity).add(new Vec(0, this.shootingEntity.getEyeHeight(), 0));
+		Vec toPlayer = playerpos.sub(pos);
+		double dist = toPlayer.length();
+
+		// walked too far away for the rope to hold: it snaps
+		if (dist > this.customization.maxlen + GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
+			this.detachFromEntity();
+			return;
+		}
+
+		// crouching reels the entity in
+		boolean retracting = this.shootingEntity.isCrouching();
+		if (retracting) {
+			this.r = Math.max(ENTITY_ATTACH_MIN_ROPE, this.r - GrappleConfig.getConf().grapplinghook.other.hook_entity_retract_speed);
+		}
+
+		if (dist > this.r && dist > ENTITY_ATTACH_MIN_ROPE) {
+			double excess = dist - this.r;
+			double maxPull = retracting ? 0.9 : 0.35;
+			double strength = Math.min(excess * 0.15, maxPull);
+			Vec pull = toPlayer.changeLen(strength);
+			Vec newmotion = Vec.motionVec(target).add(pull);
+			target.setDeltaMovement(newmotion.toVec3d());
+			// force a velocity sync to clients; mobs otherwise ignore server-side motion changes
+			target.hurtMarked = true;
+		}
+	}
+
+	private void detachFromEntity() {
+		int ownerId = this.shootingEntityID;
+		GrapplemodUtils.sendToCorrectClient(new GrappleDetachMessage(ownerId), ownerId, this.level());
+		ServerControllerManager.attached.remove(ownerId);
+		this.removeServer();
+	}
+
 	public void serverAttach(BlockPos blockpos, Vec pos, Direction sideHit) {
 		if (this.attached) {
 			return;
@@ -460,6 +559,9 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			return;
 		}
 		this.attached = true;
+
+		// impact velocity, captured before the hook is frozen in place (blocks/tick)
+		Vec impactVel = Vec.motionVec(this);
 
 		if (blockpos != null) {
 			Block block = this.level().getBlockState(blockpos).getBlock();
@@ -503,6 +605,19 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		if (!attachedToShip) {
 			Vec curpos = Vec.positionVec(this).add(nudge);
 			curpos.setPos(this);
+		} else {
+			// give the ship a small knock at the impact point, scaled by impact speed:
+			// light ships get visibly nudged, heavy ships barely notice
+			double impulseMult = GrappleConfig.getConf().grapplinghook.other.hook_ship_impulse;
+			double speedMps = impactVel.length() * 20.0;
+			if (impulseMult > 0 && speedMps > 1.0) {
+				Vec impulse = impactVel.changeLen(speedMps * HOOK_IMPULSE_MASS_KG * impulseMult);
+				Vec shipyardPos = new Vec(
+						this.getPersistentData().getDouble("vs_local_x"),
+						this.getPersistentData().getDouble("vs_local_y"),
+						this.getPersistentData().getDouble("vs_local_z"));
+				ValkyrienSkiesIntegration.queueShipImpulse(this.level(), this.getPersistentData().getLong("vs_ship_id"), impulse, shipyardPos);
+			}
 		}
 
 		this.setDeltaMovement(0, 0, 0);

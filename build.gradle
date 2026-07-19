@@ -160,6 +160,8 @@ dependencies {
     implementation "org.valkyrienskies.core:api:${vs_core_version}"
     implementation "org.valkyrienskies.core:impl:${vs_core_version}"
     implementation "org.valkyrienskies.core:util:${vs_core_version}"
+    // internal: needed at compile time for ValkyrienSkiesMod.getVsCore() (phys-tick force application)
+    implementation "org.valkyrienskies.core:internal:${vs_core_version}"
 
     implementation("org.joml:joml:1.10.5")
 

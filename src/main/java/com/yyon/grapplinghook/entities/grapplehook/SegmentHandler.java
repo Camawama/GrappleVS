@@ -128,7 +128,8 @@ public class SegmentHandler {
 
 			Vec beforepoint = segments.get(index-1);
 
-			Vec edgevec = getNormal(bottomside).cross(getNormal(topside));
+			long bendShipId = segmentShipIds.get(index);
+			Vec edgevec = getWorldNormal(bottomside, bendShipId).cross(getWorldNormal(topside, bendShipId));
 			Vec planenormal = beforepoint.sub(closest).cross(edgevec);
 
 			if (ropevec.dot(planenormal) > 0) {
@@ -154,7 +155,8 @@ public class SegmentHandler {
 
 				Vec beforepoint = segments.get(index+1);
 
-				Vec edgevec = getNormal(bottomside).cross(getNormal(topside));
+				long bendShipId = segmentShipIds.get(index);
+				Vec edgevec = getWorldNormal(bottomside, bendShipId).cross(getWorldNormal(topside, bendShipId));
 				Vec planenormal = beforepoint.sub(farthest).cross(edgevec);
 
 				if (ropevec.dot(planenormal) > 0 || ropevec.length() < 0.1) {
@@ -212,6 +214,23 @@ public class SegmentHandler {
 
 		// if rope hit block
 		if (bottomraytraceresult != null) {
+			// If the rope hit a Valkyrien Skies ship, measure last tick's rope in the ship's
+			// reference frame (glue the prev endpoints to the ship). Otherwise a ship moving or
+			// rotating into a stationary rope also "hits" with the prev endpoints and the crossing
+			// is never detected.
+			long bottomShipId = NO_SHIP;
+			if (GrapplemodUtils.vsLoaded()) {
+				bottomShipId = ValkyrienSkiesIntegration.getShipIdManaging(this.world, bottomraytraceresult.getBlockPos());
+				if (bottomShipId != NO_SHIP) {
+					Vec prevTopAdj = ValkyrienSkiesIntegration.prevTickWorldPosToCurrent(this.world, bottomShipId, prevtop);
+					Vec prevBottomAdj = ValkyrienSkiesIntegration.prevTickWorldPosToCurrent(this.world, bottomShipId, prevbottom);
+					if (prevTopAdj != null && prevBottomAdj != null) {
+						prevtop = prevTopAdj;
+						prevbottom = prevBottomAdj;
+					}
+				}
+			}
+
 			if (GrapplemodUtils.rayTraceBlocks(this.world, prevbottom, prevtop) != null) {
 				return;
 			}
@@ -219,7 +238,7 @@ public class SegmentHandler {
 			Vec bottomhitvec = new Vec(bottomraytraceresult.getLocation());
 
 			Direction bottomside = bottomraytraceresult.getDirection();
-			Vec bottomnormal = this.getNormal(bottomside);
+			Vec bottomnormal = this.getWorldNormal(bottomside, bottomShipId);
 
 			// calculate where bottomhitvec was along the rope in the previous tick
 			double prevropelen = prevtop.sub(prevbottom).length();
@@ -241,14 +260,21 @@ public class SegmentHandler {
 					Vec cornerhitpos = new Vec(cornerraytraceresult.getLocation());
 					Direction cornerside = cornerraytraceresult.getDirection();
 
-					if (cornerside == bottomside ||
-							cornerside.getOpposite() == bottomside) {
+					long cornerShipId = NO_SHIP;
+					if (GrapplemodUtils.vsLoaded()) {
+						cornerShipId = ValkyrienSkiesIntegration.getShipIdManaging(this.world, cornerraytraceresult.getBlockPos());
+					}
+					Vec cornernormal = this.getWorldNormal(cornerside, cornerShipId);
+
+					// world-space parallelism check: on rotated ships the corner face can be
+					// (anti)parallel to the bottom face without the Direction enums matching
+					if (Math.abs(cornernormal.dot(bottomnormal)) > 0.99) {
 						// this should not happen
 						continue;
 					} else {
 						// add a bend around the corner
 						Vec actualcorner = cornerhitpos.add(bottomnormal.changeLen(intoBlock));
-						Vec bend = actualcorner.add(bottomnormal.changeLen(bendOffset)).add(getNormal(cornerside).changeLen(bendOffset));
+						Vec bend = actualcorner.add(bottomnormal.changeLen(bendOffset)).add(cornernormal.changeLen(bendOffset));
 						Vec topropevec = bend.sub(top);
 						Vec bottomropevec = bend.sub(bottom);
 
@@ -266,15 +292,12 @@ public class SegmentHandler {
 
 						// if the corner block belongs to a Valkyrien Skies ship, remember the ship
 						// and the bend's ship-local position so it can follow the ship
-						long shipId = NO_SHIP;
+						long shipId = cornerShipId;
 						Vec shipLocal = null;
-						if (GrapplemodUtils.vsLoaded()) {
-							shipId = ValkyrienSkiesIntegration.getShipIdManaging(this.world, cornerraytraceresult.getBlockPos());
-							if (shipId != NO_SHIP) {
-								shipLocal = ValkyrienSkiesIntegration.worldToShip(this.world, shipId, bend);
-								if (shipLocal == null) {
-									shipId = NO_SHIP;
-								}
+						if (shipId != NO_SHIP) {
+							shipLocal = ValkyrienSkiesIntegration.worldToShip(this.world, shipId, bend);
+							if (shipLocal == null) {
+								shipId = NO_SHIP;
 							}
 						}
 
@@ -321,6 +344,22 @@ public class SegmentHandler {
 	public Vec getNormal(Direction facing) {
 		Vec3i facingvec = facing.getNormal();
 		return new Vec(facingvec.getX(), facingvec.getY(), facingvec.getZ());
+	}
+
+	/**
+	 * World-space normal of a hit side. Sides reported by ship raytraces are shipyard-space
+	 * Directions, so for ship bends the normal must be rotated by the ship's current transform;
+	 * world bends pass NO_SHIP and get the plain axis-aligned normal.
+	 */
+	public Vec getWorldNormal(Direction facing, long shipId) {
+		Vec normal = getNormal(facing);
+		if (shipId != NO_SHIP && GrapplemodUtils.vsLoaded()) {
+			Vec world = ValkyrienSkiesIntegration.shipDirToWorld(this.world, shipId, normal);
+			if (world != null) {
+				return world;
+			}
+		}
+		return normal;
 	}
 
 	public boolean hookPastBend(double ropelen) {
