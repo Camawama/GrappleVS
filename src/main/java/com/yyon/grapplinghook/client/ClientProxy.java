@@ -6,6 +6,8 @@ import com.yyon.grapplinghook.blocks.modifierblock.TileEntityGrappleModifier;
 import com.yyon.grapplinghook.common.CommonSetup;
 import com.yyon.grapplinghook.config.GrappleConfig;
 import com.yyon.grapplinghook.controllers.GrappleController;
+import com.yyon.grapplinghook.controllers.GrappledController;
+import com.yyon.grapplinghook.entities.grapplehook.GrapplehookEntity;
 import com.yyon.grapplinghook.items.GrapplehookItem;
 import com.yyon.grapplinghook.network.BaseMessageClient;
 import com.yyon.grapplinghook.utils.GrappleCustomization;
@@ -204,6 +206,23 @@ public class ClientProxy extends ClientProxyInterface {
 	@Override
 	public GrappleController unregisterController(int entityId) {
 		return ClientControllerManager.unregisterController(entityId);
+	}
+
+	@Override
+	public void updateGrappledControl(GrapplehookEntity hook, Entity target) {
+		if (target != Minecraft.getInstance().player) {
+			return;
+		}
+		GrappleController existing = ClientControllerManager.controllers.get(target.getId());
+		if (existing instanceof GrappledController) {
+			return;
+		}
+		// the player's own grapple takes priority; don't stack a second constraint onto it
+		if (existing != null && existing.attached && existing.controllerId == GrapplemodUtils.GRAPPLEID) {
+			return;
+		}
+		GrappledController controller = new GrappledController(hook.getId(), target.getId(), target.level(), hook.customization);
+		ClientControllerManager.registerController(target.getId(), controller);
 	}
 
 	@Override

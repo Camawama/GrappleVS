@@ -494,7 +494,20 @@ public class GrapplehookItem extends Item implements KeypressItem {
 					list.add(Component.literal(ClientProxyInterface.proxy.localize(custom.getName("repel"))));
 				}
 				
+				java.util.List<GrappleCustomization.upgradeCategories> upgrades = com.yyon.grapplinghook.utils.HookUpgrades.get(stack);
+				if (!upgrades.isEmpty()) {
+					StringBuilder joined = new StringBuilder();
+					for (GrappleCustomization.upgradeCategories cat : upgrades) {
+						if (joined.length() > 0) {
+							joined.append(", ");
+						}
+						joined.append(cat.getName());
+					}
+					list.add(Component.literal(ClientProxyInterface.proxy.localize("grappletooltip.upgrades.desc") + " " + joined));
+				}
+
 				list.add(Component.literal(""));
+				list.add(Component.literal(ClientSetup.key_hookconfig.getTranslatedKeyMessage().getString() + " " + ClientProxyInterface.proxy.localize("grappletooltip.pressconfig.desc")));
 				list.add(Component.literal(ClientProxyInterface.proxy.localize("grappletooltip.shiftcontrols.desc")));
 				list.add(Component.literal(ClientProxyInterface.proxy.localize("grappletooltip.controlconfiguration.desc")));
 			}

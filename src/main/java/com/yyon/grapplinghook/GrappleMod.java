@@ -46,6 +46,7 @@ public class GrappleMod {
         CommonSetup.ENCHANTMENTS.register(bus);
         CommonSetup.BLOCK_ENTITY_TYPES.register(bus);
         CommonSetup.TABS.register(bus);
+        CommonSetup.RECIPE_SERIALIZERS.register(bus);
 
         // explicit construction instead of a static-initializer side effect: registers the
         // forge-bus event handlers and the AutoConfig serializer

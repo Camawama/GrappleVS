@@ -14,6 +14,7 @@ import com.yyon.grapplinghook.items.GrapplehookItem;
 import com.yyon.grapplinghook.items.LongFallBoots;
 import com.yyon.grapplinghook.items.upgrades.BaseUpgradeItem;
 import com.yyon.grapplinghook.items.upgrades.DoubleUpgradeItem;
+import com.yyon.grapplinghook.items.upgrades.GrappleUpgradeRecipe;
 import com.yyon.grapplinghook.items.upgrades.ForcefieldUpgradeItem;
 import com.yyon.grapplinghook.items.upgrades.LimitsUpgradeItem;
 import com.yyon.grapplinghook.items.upgrades.MagnetUpgradeItem;
@@ -25,6 +26,7 @@ import com.yyon.grapplinghook.items.upgrades.SwingUpgradeItem;
 import com.yyon.grapplinghook.items.upgrades.ThrowUpgradeItem;
 import com.yyon.grapplinghook.network.DetachSingleHookMessage;
 import com.yyon.grapplinghook.network.GrappleAttachMessage;
+import com.yyon.grapplinghook.network.GrappleItemCustomizationMessage;
 import com.yyon.grapplinghook.network.GrappleAttachPosMessage;
 import com.yyon.grapplinghook.network.GrappleDetachMessage;
 import com.yyon.grapplinghook.network.GrappleEndMessage;
@@ -62,6 +64,7 @@ import java.util.Optional;
 public class CommonSetup {
 
 	public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, "grapplemod");
+	public static final DeferredRegister<net.minecraft.world.item.crafting.RecipeSerializer<?>> RECIPE_SERIALIZERS = DeferredRegister.create(ForgeRegistries.RECIPE_SERIALIZERS, "grapplemod");
 	public static final DeferredRegister<Enchantment> ENCHANTMENTS = DeferredRegister.create(ForgeRegistries.ENCHANTMENTS, "grapplemod");
 	public static final DeferredRegister<Block> BLOCKS = DeferredRegister.create(ForgeRegistries.BLOCKS, "grapplemod");
 	public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITY_TYPES = DeferredRegister.create(ForgeRegistries.BLOCK_ENTITY_TYPES, "grapplemod");
@@ -84,6 +87,10 @@ public class CommonSetup {
     public static RegistryObject<RocketUpgradeItem> rocketUpgradeItem = ITEMS.register("rocketupgradeitem", RocketUpgradeItem::new);
 
     public static RegistryObject<Item> longFallBootsItem = ITEMS.register("longfallboots", ()->new LongFallBoots(ArmorMaterials.DIAMOND, 3));
+
+    // smithing-table recipe that bakes an upgrade category into a hook's NBT
+    public static RegistryObject<net.minecraft.world.item.crafting.RecipeSerializer<?>> upgradeRecipeSerializer =
+            RECIPE_SERIALIZERS.register("hook_upgrade", GrappleUpgradeRecipe.Serializer::new);
     
     public static RegistryObject<WallrunEnchantment> wallrunEnchantment = ENCHANTMENTS.register("wallrunenchantment", WallrunEnchantment::new);
     public static RegistryObject<DoublejumpEnchantment> doubleJumpEnchantment = ENCHANTMENTS.register("doublejumpenchantment", DoublejumpEnchantment::new);
@@ -99,8 +106,9 @@ public class CommonSetup {
 	
 	public static CommonEventHandlers eventHandlers; // constructed in the GrappleMod constructor
 
-	// bumped from 1.0: SegmentMessage and GrappleAttachMessage now carry per-bend ship data
-	public static final String NETWORK_PROTOCOL_VERSION = "2.0";
+	// 2.0: SegmentMessage and GrappleAttachMessage carry per-bend ship data
+	// 2.1: added GrappleItemCustomizationMessage (in-hand hook customization)
+	public static final String NETWORK_PROTOCOL_VERSION = "2.1";
 
 	@SubscribeEvent
 	public static void init(FMLCommonSetupEvent event) {
@@ -120,6 +128,7 @@ public class CommonSetup {
 		network.registerMessage(id++, GrappleAttachPosMessage.class, GrappleAttachPosMessage::encode, GrappleAttachPosMessage::new, GrappleAttachPosMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
 		network.registerMessage(id++, SegmentMessage.class, SegmentMessage::encode, SegmentMessage::new, SegmentMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
 		network.registerMessage(id++, LoggedInMessage.class, LoggedInMessage::encode, LoggedInMessage::new, LoggedInMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+		network.registerMessage(id++, GrappleItemCustomizationMessage.class, GrappleItemCustomizationMessage::encode, GrappleItemCustomizationMessage::new, GrappleItemCustomizationMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_SERVER));
 	}
 	
 

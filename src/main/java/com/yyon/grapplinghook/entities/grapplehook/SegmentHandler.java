@@ -204,9 +204,20 @@ public class SegmentHandler {
 
 		if (!this.world.isClientSide && this.hookEntity.shootingEntity != null) {
 			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), false, index, new Vec(0, 0, 0), Direction.DOWN, Direction.DOWN, NO_SHIP, new Vec(0, 0, 0));
-			// TRACKING_ENTITY excludes the owning player, who simulates its own segments client-side
-			CommonSetup.network.send(PacketDistributor.TRACKING_ENTITY.with(() -> this.hookEntity.shootingEntity), addmessage);
+			CommonSetup.network.send(this.segmentMessageTarget(), addmessage);
 		}
+	}
+
+	/**
+	 * Block-attached hooks: the owner simulates its own segments client-side, so TRACKING_ENTITY
+	 * (which excludes the owner) avoids double-applying. Entity-attached hooks are simulated by
+	 * the server only, so the owner must be included.
+	 */
+	private PacketDistributor.PacketTarget segmentMessageTarget() {
+		if (this.hookEntity.attachedEntity != null) {
+			return PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> this.hookEntity.shootingEntity);
+		}
+		return PacketDistributor.TRACKING_ENTITY.with(() -> this.hookEntity.shootingEntity);
 	}
 
 	public void updateSegment(Vec top, Vec prevtop, Vec bottom, Vec prevbottom, int index, int numberrecursions) {
@@ -392,8 +403,7 @@ public class SegmentHandler {
 
 		if (!this.world.isClientSide && this.hookEntity.shootingEntity != null) {
 			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), true, index, bendpoint, topside, bottomside, shipId, shipLocal != null ? shipLocal : new Vec(0, 0, 0));
-			// TRACKING_ENTITY excludes the owning player, who simulates its own segments client-side
-			CommonSetup.network.send(PacketDistributor.TRACKING_ENTITY.with(() -> this.hookEntity.shootingEntity), addmessage);
+			CommonSetup.network.send(this.segmentMessageTarget(), addmessage);
 		}
 	}
 

@@ -110,6 +110,13 @@ minecraft {
 
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
+// We now ship a real mixin (lead rendering override), so the annotation processor generates the
+// refmap and the config is registered with the dev runs.
+mixin {
+    add sourceSets.main, 'grapplemod.refmap.json'
+    config 'grapplemod.mixins.json'
+}
+
 repositories {
     // 1. Maven Central MUST be top to fix the 'typetools' error
     mavenCentral()
@@ -168,6 +175,8 @@ dependencies {
     // Explicitly add typetools to resolve the missing dependency error
     implementation "net.jodah:typetools:0.6.3"
 
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
     // JEI
     compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
     compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}")
@@ -212,7 +221,8 @@ jar {
                 'Implementation-Title': project.name,
                 'Implementation-Version': mod_version,
                 'Implementation-Vendor': mod_authors,
-                'Implementation-Timestamp': new Date().format('yyyy-MM-dd\'T\'HH:mm:ssZ')
+                'Implementation-Timestamp': new Date().format('yyyy-MM-dd\'T\'HH:mm:ssZ'),
+                'MixinConfigs': 'grapplemod.mixins.json'
         ])
     }
 }

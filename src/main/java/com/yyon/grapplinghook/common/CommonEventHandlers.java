@@ -19,8 +19,11 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import com.yyon.grapplinghook.utils.Vec;
+import net.minecraft.world.entity.Mob;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
@@ -37,6 +40,50 @@ public class CommonEventHandlers {
 	    MinecraftForge.EVENT_BUS.register(this);
 
 		AutoConfig.register(GrappleConfig.class, Toml4jConfigSerializer<GrappleConfig>::new);
+	}
+
+	/**
+	 * Lead overhaul: leashed mobs swing on the lead instead of vanilla's jerky elastic bounce.
+	 * When the lead is stretched past its natural length, the outward velocity component is
+	 * dropped (so the mob pendulums around the holder) and a bedrock-style spring eases it back.
+	 * Vanilla attach rules and the 10-block break distance are untouched.
+	 */
+	@SubscribeEvent
+	public void onLivingTick(LivingEvent.LivingTickEvent event) {
+		if (event.getEntity().level().isClientSide) {
+			return;
+		}
+		if (!(event.getEntity() instanceof Mob)) {
+			return;
+		}
+		if (!GrappleConfig.getConf().leads.overhaul_enabled) {
+			return;
+		}
+		Mob mob = (Mob) event.getEntity();
+		Entity holder = mob.getLeashHolder();
+		if (holder == null || holder.level() != mob.level()) {
+			return;
+		}
+
+		final double leadLength = 6.0;
+		Vec holderPos = new Vec(holder.getRopeHoldPosition(1.0F));
+		Vec mobPos = Vec.positionVec(mob).add(new Vec(0, mob.getBbHeight() * 0.7, 0));
+		Vec spherevec = mobPos.sub(holderPos);
+		double dist = spherevec.length();
+		if (dist <= leadLength) {
+			return;
+		}
+
+		Vec motion = Vec.motionVec(mob);
+		// swinging: keep tangential velocity, drop the outward component
+		if (motion.dot(spherevec) > 0) {
+			motion = motion.removeAlong(spherevec);
+		}
+		// spring back toward lead length, softened so the drag looks smooth
+		Vec spherechange = spherevec.changeLen(leadLength).sub(spherevec);
+		motion = motion.add(spherechange.mult(0.2));
+		mob.setDeltaMovement(motion.toVec3d());
+		mob.hurtMarked = true;
 	}
 
 	@SubscribeEvent

@@ -258,6 +258,14 @@ public class GrappleConfig implements ConfigData {
 			@Tooltip
 			public boolean longfallbootsrecipe = true;
 		}
+
+		@ConfigEntry.Gui.CollapsibleObject
+		@Tooltip
+		public Leads leads = new Leads();
+		public static class Leads {
+			@Tooltip
+			public boolean overhaul_enabled = true;
+		}
 		
 		@ConfigEntry.Gui.CollapsibleObject
 		@Tooltip

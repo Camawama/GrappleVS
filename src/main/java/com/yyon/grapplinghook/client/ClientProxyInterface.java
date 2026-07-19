@@ -2,6 +2,7 @@ package com.yyon.grapplinghook.client;
 
 import com.yyon.grapplinghook.blocks.modifierblock.TileEntityGrappleModifier;
 import com.yyon.grapplinghook.controllers.GrappleController;
+import com.yyon.grapplinghook.entities.grapplehook.GrapplehookEntity;
 import com.yyon.grapplinghook.network.BaseMessageClient;
 import com.yyon.grapplinghook.utils.GrappleCustomization;
 import com.yyon.grapplinghook.utils.Vec;
@@ -78,6 +79,12 @@ public abstract class ClientProxyInterface {
 	public abstract boolean isKeyDown(GrappleKeys key);
 
 	public abstract GrappleController unregisterController(int entityId);
+
+	/**
+	 * Called every client tick for a hook clinging to an entity; starts swing physics on the
+	 * local player when they are the grappled target.
+	 */
+	public abstract void updateGrappledControl(GrapplehookEntity hook, Entity target);
 
 	public abstract double getTimeSinceLastRopeJump(Level world);
 

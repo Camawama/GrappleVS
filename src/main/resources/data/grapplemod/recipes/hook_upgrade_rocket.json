@@ -1,0 +1,7 @@
+{
+  "type": "grapplemod:hook_upgrade",
+  "template": { "item": "grapplemod:rocketupgradeitem" },
+  "base": { "item": "grapplemod:grapplinghook" },
+  "addition": { "item": "minecraft:iron_ingot" },
+  "result": { "item": "grapplemod:grapplinghook" }
+}

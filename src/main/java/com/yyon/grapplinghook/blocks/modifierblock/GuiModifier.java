@@ -41,6 +41,10 @@ public class GuiModifier extends Screen {
 	TileEntityGrappleModifier tileEnt;
 	GrappleCustomization customization;
 
+	// in-hand mode: editing the held hook directly, gated by smithing upgrades on the item
+	net.minecraft.world.InteractionHand hand = null;
+	ItemStack stack = null;
+
 	GrappleCustomization.upgradeCategories category = null;
 
 	public GuiModifier(TileEntityGrappleModifier tileent) {
@@ -48,6 +52,24 @@ public class GuiModifier extends Screen {
 
 		this.tileEnt = tileent;
 		customization = tileent.customization;
+	}
+
+	public GuiModifier(net.minecraft.world.InteractionHand hand, ItemStack stack) {
+		super(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.title.desc")));
+
+		this.hand = hand;
+		this.stack = stack;
+		customization = com.yyon.grapplinghook.common.CommonSetup.grapplingHookItem.get().getCustomization(stack);
+	}
+
+	private boolean isCategoryUnlocked(GrappleCustomization.upgradeCategories category) {
+		if (Minecraft.getInstance().player.isCreative()) {
+			return true;
+		}
+		if (this.tileEnt != null) {
+			return this.tileEnt.isUnlocked(category);
+		}
+		return com.yyon.grapplinghook.utils.HookUpgrades.has(this.stack, category);
 	}
 
 	@Override
@@ -65,7 +87,7 @@ public class GuiModifier extends Screen {
 		}
 		
 		public void onPress(Button p_onPress_1_) {
-			boolean unlocked = tileEnt.isUnlocked(category) || Minecraft.getInstance().player.isCreative();
+			boolean unlocked = isCategoryUnlocked(category);
 
 			if (unlocked) {
 				showCategoryScreen(category);
@@ -197,10 +219,16 @@ public class GuiModifier extends Screen {
 		this.category = category;
 		this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock1.desc")), this.guiLeft + 10, this.guiTop + 10));
 		this.addRenderableWidget(new TextWidget(Component.literal(this.category.getName()), this.guiLeft + 10, this.guiTop + 25));
-		this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock2.desc")), this.guiLeft + 10, this.guiTop + 40));
-		this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock3.desc")), this.guiLeft + 10, this.guiTop + 55));
-		this.addRenderableWidget(new TextWidget(new ItemStack(this.category.getItem()).getDisplayName(), this.guiLeft + 10, this.guiTop + 70));
-		this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock4.desc")), this.guiLeft + 10, this.guiTop + 85));
+		if (this.tileEnt != null) {
+			this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock2.desc")), this.guiLeft + 10, this.guiTop + 40));
+			this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock3.desc")), this.guiLeft + 10, this.guiTop + 55));
+			this.addRenderableWidget(new TextWidget(new ItemStack(this.category.getItem()).getDisplayName(), this.guiLeft + 10, this.guiTop + 70));
+			this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.unlock4.desc")), this.guiLeft + 10, this.guiTop + 85));
+		} else {
+			this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.smithing1.desc")), this.guiLeft + 10, this.guiTop + 40));
+			this.addRenderableWidget(new TextWidget(new ItemStack(this.category.getItem()).getDisplayName(), this.guiLeft + 10, this.guiTop + 55));
+			this.addRenderableWidget(new TextWidget(Component.literal(ClientProxyInterface.proxy.localize("grapplemodifier.smithing2.desc")), this.guiLeft + 10, this.guiTop + 70));
+		}
 	}
 
 	public void helpScreen() {
@@ -375,9 +403,14 @@ public class GuiModifier extends Screen {
 	
 	@Override
 	public void onClose() {
-//		this.updateOptions();
-		this.tileEnt.setCustomizationClient(customization);
-		
+		if (this.tileEnt != null) {
+			this.tileEnt.setCustomizationClient(customization);
+		} else {
+			com.yyon.grapplinghook.common.CommonSetup.network.sendToServer(
+					new com.yyon.grapplinghook.network.GrappleItemCustomizationMessage(
+							this.hand == net.minecraft.world.InteractionHand.MAIN_HAND, customization));
+		}
+
 		super.onClose();
 	}
 	
@@ -418,9 +451,6 @@ public class GuiModifier extends Screen {
 	}
 	
 	public int getLimits() {
-		if (this.tileEnt.isUnlocked(GrappleCustomization.upgradeCategories.LIMITS) || Minecraft.getInstance().player.isCreative()) {
-			return 1;
-		}
-		return 0;
+		return isCategoryUnlocked(GrappleCustomization.upgradeCategories.LIMITS) ? 1 : 0;
 	}
 }

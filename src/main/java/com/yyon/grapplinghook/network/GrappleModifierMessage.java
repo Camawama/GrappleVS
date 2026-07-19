@@ -73,24 +73,29 @@ public class GrappleModifierMessage extends BaseMessageServer {
 		}
     }
 
+	private static GrappleCustomization validate(GrappleCustomization requested, TileEntityGrappleModifier tile, ServerPlayer player) {
+		return validate(requested, tile::isUnlocked, player.isCreative());
+	}
+
 	/**
 	 * The GUI enforces unlocked categories and slider limits client-side only; re-apply the same
-	 * rules here so a modified client can't set locked or out-of-range options.
+	 * rules here so a modified client can't set locked or out-of-range options. Shared by the
+	 * modifier-block path (tile unlocks) and the in-hand path (item NBT upgrades).
 	 */
-	private static GrappleCustomization validate(GrappleCustomization requested, TileEntityGrappleModifier tile, ServerPlayer player) {
-		boolean creative = player.isCreative();
-		int limits = (creative || tile.isUnlocked(GrappleCustomization.upgradeCategories.LIMITS)) ? 1 : 0;
+	public static GrappleCustomization validate(GrappleCustomization requested,
+			java.util.function.Predicate<GrappleCustomization.upgradeCategories> unlocked, boolean creative) {
+		int limits = (creative || unlocked.test(GrappleCustomization.upgradeCategories.LIMITS)) ? 1 : 0;
 
 		GrappleCustomization result = new GrappleCustomization();
 		for (String option : GrappleCustomization.booleanoptions) {
 			boolean val = requested.getBoolean(option);
-			if (val != result.getBoolean(option) && isOptionAllowed(option, tile, creative, limits)) {
+			if (val != result.getBoolean(option) && isOptionAllowed(option, unlocked, creative, limits)) {
 				result.setBoolean(option, val);
 			}
 		}
 		for (String option : GrappleCustomization.doubleoptions) {
 			double val = requested.getDouble(option);
-			if (val != result.getDouble(option) && isOptionAllowed(option, tile, creative, limits)) {
+			if (val != result.getDouble(option) && isOptionAllowed(option, unlocked, creative, limits)) {
 				double min = result.getMin(option, limits);
 				double max = result.getMax(option, limits);
 				result.setDouble(option, Math.max(min, Math.min(max, val)));
@@ -99,9 +104,10 @@ public class GrappleModifierMessage extends BaseMessageServer {
 		return result;
 	}
 
-	private static boolean isOptionAllowed(String option, TileEntityGrappleModifier tile, boolean creative, int limits) {
+	private static boolean isOptionAllowed(String option,
+			java.util.function.Predicate<GrappleCustomization.upgradeCategories> unlocked, boolean creative, int limits) {
 		GrappleCustomization.upgradeCategories category = GrappleCustomization.getCategory(option);
-		if (category != null && !creative && !tile.isUnlocked(category)) {
+		if (category != null && !creative && !unlocked.test(category)) {
 			return false;
 		}
 		// enabled: 0 = always, 1 = requires limits upgrade, 2 = disabled by config

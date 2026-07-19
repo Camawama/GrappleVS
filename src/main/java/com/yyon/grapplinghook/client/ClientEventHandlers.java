@@ -65,6 +65,19 @@ public class ClientEventHandlers {
 				ClientControllerManager.instance.onClientTick(player);
 
 				if (Minecraft.getInstance().screen == null) {
+					// in-hand hook customization screen
+					while (ClientSetup.key_hookconfig.consumeClick()) {
+						InteractionHand hand = InteractionHand.MAIN_HAND;
+						ItemStack held = player.getMainHandItem();
+						if (!(held.getItem() instanceof com.yyon.grapplinghook.items.GrapplehookItem)) {
+							hand = InteractionHand.OFF_HAND;
+							held = player.getOffhandItem();
+						}
+						if (held.getItem() instanceof com.yyon.grapplinghook.items.GrapplehookItem) {
+							Minecraft.getInstance().setScreen(new com.yyon.grapplinghook.blocks.modifierblock.GuiModifier(hand, held));
+						}
+					}
+
 					for (HeldKey keyState : keyStates) {
 						while (keyState.mapping.consumeClick()) {
 							keyState.held = true;

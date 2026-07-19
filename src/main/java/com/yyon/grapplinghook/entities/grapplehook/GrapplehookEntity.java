@@ -19,6 +19,9 @@ import net.minecraft.core.Direction.Axis;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -128,6 +131,21 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 	// equivalent hook mass (kg) used to convert impact speed into a ship impulse
 	private static final double HOOK_IMPULSE_MASS_KG = 15.0;
 
+	// synced so every client can pin the hook onto the (already interpolated) target entity and
+	// compute rope sag locally, and so a grappled player's client can run its own swing physics
+	private static final EntityDataAccessor<Integer> DATA_ATTACHED_ENTITY =
+			SynchedEntityData.defineId(GrapplehookEntity.class, EntityDataSerializers.INT);
+	private static final EntityDataAccessor<Float> DATA_ROPE_LENGTH =
+			SynchedEntityData.defineId(GrapplehookEntity.class, EntityDataSerializers.FLOAT);
+
+	public int getSyncedAttachedEntityId() {
+		return this.entityData.get(DATA_ATTACHED_ENTITY);
+	}
+
+	public double getSyncedRopeLength() {
+		return this.entityData.get(DATA_ROPE_LENGTH);
+	}
+
 	/** Ship id this hook is attached to, or -1. Safe to call without VS installed. */
 	public long getAttachedShipId() {
 		return this.getPersistentData().contains("vs_ship_id") ? this.getPersistentData().getLong("vs_ship_id") : -1;
@@ -184,6 +202,8 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 	@Override
 	public void defineSynchedData() {
 		super.defineSynchedData();
+		this.entityData.define(DATA_ATTACHED_ENTITY, 0);
+		this.entityData.define(DATA_ROPE_LENGTH, 0.0F);
 	}
 
 	public void removeServer() {
@@ -238,6 +258,13 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		}
 
 		super.tick();
+
+		if (this.level().isClientSide) {
+			int syncedTarget = this.getSyncedAttachedEntityId();
+			if (syncedTarget != 0) {
+				this.clientTickEntityAttachment(syncedTarget);
+			}
+		}
 
 		if (!this.level().isClientSide) {
 			if (this.shootingEntity != null)  {
@@ -496,6 +523,10 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		double dist = playerpos.sub(pos).length();
 		this.r = Math.min(Math.max(dist, ENTITY_ATTACH_MIN_ROPE), this.customization.maxlen);
 
+		// every client pins the hook onto the target and computes sag from these
+		this.entityData.set(DATA_ATTACHED_ENTITY, target.getId());
+		this.entityData.set(DATA_ROPE_LENGTH, (float) this.r);
+
 		ServerControllerManager.attached.add(this.shootingEntityID);
 
 		// pin the hook onto the entity for every nearby client; hook position afterwards flows
@@ -504,7 +535,12 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		CommonSetup.network.send(PacketDistributor.TRACKING_CHUNK.with(() -> this.level().getChunkAt(BlockPos.containing(pos.x, pos.y, pos.z))), msg);
 	}
 
-	/** Server tick while clinging to an entity: follow it and apply the lead-rope pull. */
+	/**
+	 * Server tick while clinging to an entity: follow it, keep the rope segments (bends) up to
+	 * date, and swing-constrain the target the same way the player controller constrains a player
+	 * hanging from a wall hook. Player targets run their own client-side swing physics
+	 * (GrappledController), so the server only reels and rope-snaps for them.
+	 */
 	private void tickEntityAttachment() {
 		Entity target = this.attachedEntity;
 		if (target == null || !target.isAlive() || this.shootingEntity == null) {
@@ -517,34 +553,83 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		this.thisPos = pos;
 
 		Vec playerpos = Vec.positionVec(this.shootingEntity).add(new Vec(0, this.shootingEntity.getEyeHeight(), 0));
-		Vec toPlayer = playerpos.sub(pos);
-		double dist = toPlayer.length();
 
-		// walked too far away for the rope to hold: it snaps
-		if (dist > this.customization.maxlen + GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
+		// rope bends around terrain: hook end moves with the target, player end with the shooter
+		if (!this.customization.phaserope) {
+			this.segmentHandler.update(pos, playerpos, this.r, true);
+		} else {
+			this.segmentHandler.updatePos(pos, playerpos, this.r);
+		}
+
+		// the target swings around the bend nearest to it; the rest of the rope is spoken for
+		Vec anchor = this.segmentHandler.getFarthest();
+		double usedRope = this.segmentHandler.getDistToFarthest();
+
+		Vec spherevec = pos.sub(anchor);
+		double dist = spherevec.length();
+
+		// too far for the rope to hold: it snaps
+		if (dist + usedRope > this.customization.maxlen + GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
 			this.detachFromEntity();
 			return;
 		}
 
-		// crouching reels the entity in
-		boolean retracting = this.shootingEntity.isCrouching();
-		if (retracting) {
+		// crouching reels the target in
+		if (this.shootingEntity.isCrouching()) {
 			this.r = Math.max(ENTITY_ATTACH_MIN_ROPE, this.r - GrappleConfig.getConf().grapplinghook.other.hook_entity_retract_speed);
 		}
+		this.entityData.set(DATA_ROPE_LENGTH, (float) this.r);
 
-		if (dist > this.r && dist > ENTITY_ATTACH_MIN_ROPE) {
-			double excess = dist - this.r;
-			double maxPull = retracting ? 0.9 : 0.35;
-			double strength = Math.min(excess * 0.15, maxPull);
-			Vec pull = toPlayer.changeLen(strength);
-			Vec newmotion = Vec.motionVec(target).add(pull);
-			target.setDeltaMovement(newmotion.toVec3d());
+		if (target instanceof Player) {
+			// client-authoritative movement: the grappled player's own client applies the
+			// swing constraint (GrappledController), keyed off the synced entity data
+			return;
+		}
+
+		double allowed = Math.max(1.0, this.r - usedRope);
+		if (dist > allowed) {
+			Vec motion = Vec.motionVec(target);
+			// swinging: keep tangential velocity, drop the outward component
+			if (anchor.sub(pos.add(motion)).length() > allowed) {
+				motion = motion.removeAlong(spherevec);
+			}
+			// soften the positional correction into velocity so the drag looks smooth
+			Vec spherechange = spherevec.changeLen(allowed).sub(spherevec);
+			motion = motion.add(spherechange.mult(0.35));
+			target.setDeltaMovement(motion.toVec3d());
 			// force a velocity sync to clients; mobs otherwise ignore server-side motion changes
 			target.hurtMarked = true;
 		}
 	}
 
+	/**
+	 * Client tick while the hook clings to an entity (synced via DATA_ATTACHED_ENTITY): pin the
+	 * hook onto the target every tick so rendering interpolates along the target's own smooth
+	 * path, compute rope sag locally, and start swing physics if the local player is the target.
+	 */
+	private void clientTickEntityAttachment(int targetId) {
+		Entity target = this.level().getEntity(targetId);
+		if (target == null || !target.isAlive()) {
+			return;
+		}
+		this.attached = true;
+		Vec pos = this.hookPointOn(target);
+		this.setPos(pos.x, pos.y, pos.z);
+		this.thisPos = pos;
+
+		if (this.shootingEntity != null) {
+			Vec playerpos = Vec.positionVec(this.shootingEntity).add(new Vec(0, this.shootingEntity.getEyeHeight(), 0));
+			this.segmentHandler.updatePos(pos, playerpos, this.getSyncedRopeLength());
+			double dist = this.segmentHandler.getDist(pos, playerpos);
+			double taut = 1 - ((this.getSyncedRopeLength() - dist) / 5);
+			this.taut = Math.max(0, Math.min(1, taut));
+		}
+
+		ClientProxyInterface.proxy.updateGrappledControl(this, target);
+	}
+
 	private void detachFromEntity() {
+		this.entityData.set(DATA_ATTACHED_ENTITY, 0);
 		int ownerId = this.shootingEntityID;
 		GrapplemodUtils.sendToCorrectClient(new GrappleDetachMessage(ownerId), ownerId, this.level());
 		ServerControllerManager.attached.remove(ownerId);

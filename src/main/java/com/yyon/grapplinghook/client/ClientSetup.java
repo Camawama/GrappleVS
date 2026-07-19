@@ -59,6 +59,7 @@ public class ClientSetup {
         public static KeyMapping key_enderlaunch = createKeyBinding(new KeyMapping("key.enderlaunch.desc", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_1, "key.grapplemod.category"));
         public static KeyMapping key_rocket = createKeyBinding(new KeyMapping("key.rocket.desc", InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_1, "key.grapplemod.category"));
         public static KeyMapping key_slide = createKeyBinding(new KeyMapping("key.slide.desc", GLFW.GLFW_KEY_LEFT_SHIFT, "key.grapplemod.category"));
+        public static KeyMapping key_hookconfig = createKeyBinding(new KeyMapping("key.hookconfig.desc", GLFW.GLFW_KEY_V, "key.grapplemod.category"));
 
         static {
                 key_boththrow.setKeyModifierAndCode(KeyModifier.NONE, key_boththrow.getKey());
