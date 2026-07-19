@@ -1,12 +1,12 @@
 package com.yyon.grapplinghook.network;
 
+import com.yyon.grapplinghook.GrappleMod;
 import com.yyon.grapplinghook.config.GrappleConfig;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Type;
-import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.Comparator;
 
@@ -57,18 +57,16 @@ public class LoggedInMessage extends BaseMessageClient {
         		} else if (fieldtype.getTypeName().equals("boolean")) {
         			field.setBoolean(theObject, buf.readBoolean());
         		} else if (fieldtype.getTypeName().equals("java.lang.String")) {
-        			int len = buf.readInt();
-        			CharSequence charseq = buf.readCharSequence(len, Charset.defaultCharset());
-        			field.set(theObject, charseq.toString());
+        			field.set(theObject, buf.readUtf());
         		} else if (field.getType() != null && Object.class.isAssignableFrom(field.getType())) {
         			Class newClass = field.getType();
         			decodeClass(buf, newClass, newClass.cast(field.get(theObject)));
         		} else {
-        			System.out.println("Unknown Type");
-        			System.out.println(fieldtype.getTypeName());
+        			GrappleMod.LOGGER.warn("Unknown config field type");
+        			GrappleMod.LOGGER.warn(fieldtype.getTypeName());
         		}
     		} catch (IllegalAccessException e) {
-    			System.out.println(e);
+    			GrappleMod.LOGGER.error("Config sync reflection error", e);
     		}
     	}
     }
@@ -99,18 +97,17 @@ public class LoggedInMessage extends BaseMessageClient {
         		} else if (fieldtype.getTypeName().equals("boolean")) {
         			buf.writeBoolean(field.getBoolean(theObject));
         		} else if (fieldtype.getTypeName().equals("java.lang.String")) {
-        			String str = (String) field.get(theObject);
-        			buf.writeInt(str.length());
-        			buf.writeCharSequence(str.subSequence(0, str.length()), Charset.defaultCharset());
+        			// length-prefixed UTF-8 (platform independent; byte length matches what's written)
+        			buf.writeUtf((String) field.get(theObject));
         		} else if (field.getType() != null && Object.class.isAssignableFrom(field.getType())) {
         			Class newClass = field.getType();
         			encodeClass(buf, newClass, newClass.cast(field.get(theObject)));
         		} else {
-        			System.out.println("Unknown Type");
-        			System.out.println(fieldtype.getTypeName());
+        			GrappleMod.LOGGER.warn("Unknown config field type");
+        			GrappleMod.LOGGER.warn(fieldtype.getTypeName());
         		}
     		} catch (IllegalAccessException e) {
-    			System.out.println(e);
+    			GrappleMod.LOGGER.error("Config sync reflection error", e);
     		}
     	}
     }

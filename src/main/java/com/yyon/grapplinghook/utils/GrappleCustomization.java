@@ -238,7 +238,7 @@ public class GrappleCustomization {
 		else if (option.equals("sticky")) {this.sticky = bool;}
 		else if (option.equals("detachonkeyrelease")) {this.detachonkeyrelease = bool;}
 		else if (option.equals("rocket")) {this.rocket = bool;}
-		else {System.out.println("Option doesn't exist: " + option);}
+		else {GrappleMod.LOGGER.warn("Option does not exist: {}", option);}
 	}
 	
 	public boolean getBoolean(String option) {
@@ -259,7 +259,7 @@ public class GrappleCustomization {
 		else if (option.equals("sticky")) {return this.sticky;}
 		else if (option.equals("detachonkeyrelease")) {return this.detachonkeyrelease;}
 		else if (option.equals("rocket")) {return this.rocket;}
-		System.out.println("Option doesn't exist: " + option);
+		GrappleMod.LOGGER.warn("Option does not exist: {}", option);
 		return false;
 	}
 	
@@ -280,7 +280,7 @@ public class GrappleCustomization {
 		else if (option.equals("rocket_active_time")) {this.rocket_active_time = d;}
 		else if (option.equals("rocket_refuel_ratio")) {this.rocket_refuel_ratio = d;}
 		else if (option.equals("rocket_vertical_angle")) {this.rocket_vertical_angle = d;}
-		else {System.out.println("Option doesn't exist: " + option);}
+		else {GrappleMod.LOGGER.warn("Option does not exist: {}", option);}
 	}
 	
 	public double getDouble(String option) {
@@ -300,7 +300,7 @@ public class GrappleCustomization {
 		else if (option.equals("rocket_active_time")) {return rocket_active_time;}
 		else if (option.equals("rocket_refuel_ratio")) {return rocket_refuel_ratio;}
 		else if (option.equals("rocket_vertical_angle")) {return rocket_vertical_angle;}
-		System.out.println("Option doesn't exist: " + option);
+		GrappleMod.LOGGER.warn("Option does not exist: {}", option);
 		return 0;
 	}
 	
@@ -401,6 +401,38 @@ public class GrappleCustomization {
 			return configoption.enabled;
 		}
 		return this.getDoubleConfig(option).enabled;
+	}
+
+	/**
+	 * The upgrade category an option belongs to (mirrors the category screens in GuiModifier).
+	 * Used by the server to verify a category is unlocked before applying a client's customization.
+	 */
+	public static upgradeCategories getCategory(String option) {
+		switch (option) {
+			case "maxlen": case "phaserope": case "sticky":
+				return upgradeCategories.ROPE;
+			case "hookgravity": case "throwspeed": case "reelin": case "verticalthrowangle":
+			case "sneakingverticalthrowangle": case "detachonkeyrelease":
+				return upgradeCategories.THROW;
+			case "motor": case "motormaxspeed": case "motoracceleration": case "motorwhencrouching":
+			case "motorwhennotcrouching": case "smartmotor": case "motordampener": case "pullbackwards":
+				return upgradeCategories.MOTOR;
+			case "playermovementmult":
+				return upgradeCategories.SWING;
+			case "enderstaff":
+				return upgradeCategories.STAFF;
+			case "repel": case "repelforce":
+				return upgradeCategories.FORCEFIELD;
+			case "attract": case "attractradius":
+				return upgradeCategories.MAGNET;
+			case "doublehook": case "smartdoublemotor": case "angle": case "sneakingangle": case "oneropepull":
+				return upgradeCategories.DOUBLE;
+			case "rocket": case "rocket_force": case "rocket_active_time": case "rocket_refuel_ratio":
+			case "rocket_vertical_angle":
+				return upgradeCategories.ROCKET;
+			default:
+				return null;
+		}
 	}
 	
 	public boolean equals(GrappleCustomization other) {

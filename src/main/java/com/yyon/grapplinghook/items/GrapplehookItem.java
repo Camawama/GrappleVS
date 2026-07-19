@@ -532,7 +532,7 @@ public class GrapplehookItem extends Item implements KeypressItem {
 		
 		if (grapplehookEntitiesRight.containsKey(player)) {
 			GrapplehookEntity hookRight = grapplehookEntitiesRight.get(player);
-			setHookEntityLeft(player, null);
+			setHookEntityRight(player, null);
 			if (hookRight != null) {
 				hookRight.removeServer();
 			}

@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook.entities.grapplehook;
 
+import com.yyon.grapplinghook.GrappleMod;
 import com.yyon.grapplinghook.common.CommonSetup;
 import com.yyon.grapplinghook.integrations.ValkyrienSkiesIntegration;
 import com.yyon.grapplinghook.network.SegmentMessage;
@@ -11,21 +12,28 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.PacketDistributor;
 
+import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.List;
 
 public class SegmentHandler {
+
+	public static final long NO_SHIP = -1;
 
 	public LinkedList<Vec> segments;
 	public LinkedList<Direction> segmentBottomSides;
 	public LinkedList<Direction> segmentTopSides;
+	// Valkyrien Skies: per-bend ship id (NO_SHIP for world bends) and ship-local (shipyard) position.
+	// Ship bends are re-projected to world space every tick so the rope follows the moving ship.
+	public LinkedList<Long> segmentShipIds;
+	public LinkedList<Vec> segmentShipLocals;
 	public Level world;
 	public GrapplehookEntity hookEntity;
 
 	Vec prevHookPos = null;
-	Vec prevPlayerPos = null;;
+	Vec prevPlayerPos = null;
 
 	final double bendOffset = 0.05;
 	final double intoBlock = 0.05;
@@ -40,6 +48,12 @@ public class SegmentHandler {
 		segmentTopSides = new LinkedList<Direction>();
 		segmentTopSides.add(null);
 		segmentTopSides.add(null);
+		segmentShipIds = new LinkedList<Long>();
+		segmentShipIds.add(NO_SHIP);
+		segmentShipIds.add(NO_SHIP);
+		segmentShipLocals = new LinkedList<Vec>();
+		segmentShipLocals.add(null);
+		segmentShipLocals.add(null);
 		this.world = w;
 		this.hookEntity = hookEntity;
 		this.prevHookPos = new Vec(hookpos);
@@ -55,7 +69,32 @@ public class SegmentHandler {
 
 	double ropeLen;
 
+	/**
+	 * Re-projects every ship-attached bend to its current world position. Bends whose ship can no
+	 * longer be resolved (unloaded/deleted) are removed so the rope doesn't stay pinned in mid-air.
+	 */
+	public void refreshShipBends() {
+		if (!GrapplemodUtils.vsLoaded()) {
+			return;
+		}
+		for (int i = 1; i < segments.size() - 1; ) {
+			long shipId = segmentShipIds.get(i);
+			if (shipId == NO_SHIP) {
+				i++;
+				continue;
+			}
+			Vec worldPos = ValkyrienSkiesIntegration.shipToWorld(this.world, shipId, segmentShipLocals.get(i));
+			if (worldPos == null) {
+				this.removeSegment(i);
+			} else {
+				segments.set(i, worldPos);
+				i++;
+			}
+		}
+	}
+
 	public void updatePos(Vec hookpos, Vec playerpos, double ropelen) {
+		this.refreshShipBends();
 		segments.set(0, hookpos);
 		segments.set(segments.size() - 1, playerpos);
 		this.ropeLen = ropelen;
@@ -66,6 +105,8 @@ public class SegmentHandler {
 			prevHookPos = hookpos;
 			prevPlayerPos = playerpos;
 		}
+
+		this.refreshShipBends();
 
 		segments.set(0, hookpos);
 		segments.set(segments.size() - 1, playerpos);
@@ -156,11 +197,13 @@ public class SegmentHandler {
 		segments.remove(index);
 		segmentBottomSides.remove(index);
 		segmentTopSides.remove(index);
+		segmentShipIds.remove(index);
+		segmentShipLocals.remove(index);
 
-		if (!this.world.isClientSide) {
-			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), false, index, new Vec(0, 0, 0), Direction.DOWN, Direction.DOWN);
-			Vec playerpoint = Vec.positionVec(this.hookEntity.shootingEntity);
-			CommonSetup.network.send(PacketDistributor.TRACKING_CHUNK.with(() -> world.getChunkAt(BlockPos.containing(playerpoint.x, playerpoint.y, playerpoint.z))), addmessage);
+		if (!this.world.isClientSide && this.hookEntity.shootingEntity != null) {
+			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), false, index, new Vec(0, 0, 0), Direction.DOWN, Direction.DOWN, NO_SHIP, new Vec(0, 0, 0));
+			// TRACKING_ENTITY excludes the owning player, who simulates its own segments client-side
+			CommonSetup.network.send(PacketDistributor.TRACKING_ENTITY.with(() -> this.hookEntity.shootingEntity), addmessage);
 		}
 	}
 
@@ -169,12 +212,6 @@ public class SegmentHandler {
 
 		// if rope hit block
 		if (bottomraytraceresult != null) {
-			if (ModList.get().isLoaded("valkyrienskies")) {
-				if (ValkyrienSkiesIntegration.isBlockInShipyard(this.world, bottomraytraceresult.getBlockPos())) {
-					return;
-				}
-			}
-
 			if (GrapplemodUtils.rayTraceBlocks(this.world, prevbottom, prevtop) != null) {
 				return;
 			}
@@ -201,19 +238,12 @@ public class SegmentHandler {
 				// the corner must be in the line (cornerbound2, cornerbound1)
 				BlockHitResult cornerraytraceresult = GrapplemodUtils.rayTraceBlocks(this.world, cornerbound2, cornerbound1);
 				if (cornerraytraceresult != null) {
-					if (ModList.get().isLoaded("valkyrienskies")) {
-						if (ValkyrienSkiesIntegration.isBlockInShipyard(this.world, cornerraytraceresult.getBlockPos())) {
-							continue;
-						}
-					}
-
 					Vec cornerhitpos = new Vec(cornerraytraceresult.getLocation());
 					Direction cornerside = cornerraytraceresult.getDirection();
 
 					if (cornerside == bottomside ||
 							cornerside.getOpposite() == bottomside) {
 						// this should not happen
-//                		System.out.println("Warning: corner is same or opposite of bottomside");
 						continue;
 					} else {
 						// add a bend around the corner
@@ -225,22 +255,33 @@ public class SegmentHandler {
 						// ignore bends that are too close to another bend
 						if (topropevec.length() < 0.05) {
 							if (this.segmentBottomSides.get(index - 1) == bottomside && this.segmentTopSides.get(index - 1) == cornerside) {
-//                    			System.out.println("Warning: top bend is too close");
 								continue;
 							}
 						}
 						if (bottomropevec.length() < 0.05) {
 							if (this.segmentBottomSides.get(index) == bottomside && this.segmentTopSides.get(index) == cornerside) {
-//                    			System.out.println("Warning: bottom bend is too close");
 								continue;
 							}
 						}
 
-						this.actuallyAddSegment(index, bend, bottomside, cornerside);
+						// if the corner block belongs to a Valkyrien Skies ship, remember the ship
+						// and the bend's ship-local position so it can follow the ship
+						long shipId = NO_SHIP;
+						Vec shipLocal = null;
+						if (GrapplemodUtils.vsLoaded()) {
+							shipId = ValkyrienSkiesIntegration.getShipIdManaging(this.world, cornerraytraceresult.getBlockPos());
+							if (shipId != NO_SHIP) {
+								shipLocal = ValkyrienSkiesIntegration.worldToShip(this.world, shipId, bend);
+								if (shipLocal == null) {
+									shipId = NO_SHIP;
+								}
+							}
+						}
+
+						this.actuallyAddSegment(index, bend, bottomside, cornerside, shipId, shipLocal);
 
 						// if not enough rope length left, undo
 						if(this.getDistToAnchor() + .2 > this.ropeLen) {
-//                			System.out.println("Warning: not enough length left, removing");
 							this.removeSegment(index);
 							continue;
 						}
@@ -254,7 +295,7 @@ public class SegmentHandler {
 						if (numberrecursions < 10) {
 							updateSegment(top, prevtop, bend, prevbend, index, numberrecursions+1);
 						} else {
-							System.out.println("Warning: number recursions exceeded");
+							GrappleMod.LOGGER.warn("Rope segment recursion limit exceeded");
 						}
 						break;
 					}
@@ -287,33 +328,39 @@ public class SegmentHandler {
 	}
 
 	public BlockPos getBendBlock(int index) {
-		Vec bendpos = this.segments.get(index);
-		bendpos.add_ip(this.getNormal(this.segmentBottomSides.get(index)).changeLen(-this.intoBlock * 2));
-		bendpos.add_ip(this.getNormal(this.segmentTopSides.get(index)).changeLen(-this.intoBlock * 2));
+		Vec inwardOffset = this.getNormal(this.segmentBottomSides.get(index)).changeLen(-this.intoBlock * 2)
+				.add(this.getNormal(this.segmentTopSides.get(index)).changeLen(-this.intoBlock * 2));
+
+		// ship bends: compute the block in shipyard space, where the bend's block actually lives
+		long shipId = this.segmentShipIds.get(index);
+		if (shipId != NO_SHIP) {
+			Vec local = new Vec(this.segmentShipLocals.get(index));
+			local.add_ip(inwardOffset);
+			return BlockPos.containing(local.x, local.y, local.z);
+		}
+
+		Vec bendpos = new Vec(this.segments.get(index));
+		bendpos.add_ip(inwardOffset);
 		return BlockPos.containing(bendpos.x, bendpos.y, bendpos.z);
 	}
 
-	public void actuallyAddSegment(int index, Vec bendpoint, Direction bottomside, Direction topside) {
+	public void actuallyAddSegment(int index, Vec bendpoint, Direction bottomside, Direction topside, long shipId, Vec shipLocal) {
 		segments.add(index, bendpoint);
 		segmentBottomSides.add(index, bottomside);
 		segmentTopSides.add(index, topside);
+		segmentShipIds.add(index, shipId);
+		segmentShipLocals.add(index, shipLocal);
 
-		if (!this.world.isClientSide) {
-			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), true, index, bendpoint, topside, bottomside);
-			Vec playerpoint = Vec.positionVec(this.hookEntity.shootingEntity);
-			CommonSetup.network.send(PacketDistributor.TRACKING_CHUNK.with(() -> world.getChunkAt(BlockPos.containing(playerpoint.x, playerpoint.y, playerpoint.z))), addmessage);
+		if (!this.world.isClientSide && this.hookEntity.shootingEntity != null) {
+			SegmentMessage addmessage = new SegmentMessage(this.hookEntity.getId(), true, index, bendpoint, topside, bottomside, shipId, shipLocal != null ? shipLocal : new Vec(0, 0, 0));
+			// TRACKING_ENTITY excludes the owning player, who simulates its own segments client-side
+			CommonSetup.network.send(PacketDistributor.TRACKING_ENTITY.with(() -> this.hookEntity.shootingEntity), addmessage);
 		}
 	}
 
 	public void print() {
 		for (int i = 1; i < segments.size() - 1; i++) {
-			System.out.print(i);
-			System.out.print(" ");
-			System.out.print(segmentTopSides.get(i).toString());
-			System.out.print(" ");
-			System.out.print(segmentBottomSides.get(i).toString());
-			System.out.print(" ");
-			segments.get(i).print();
+			GrappleMod.LOGGER.debug("segment {} {} {} {}", i, segmentTopSides.get(i), segmentBottomSides.get(i), segments.get(i));
 		}
 	}
 
@@ -356,12 +403,19 @@ public class SegmentHandler {
 		return dist;
 	}
 
+	/**
+	 * Read-only: called from the render thread (culling), so it must not mutate the segment lists
+	 * the tick threads are working with.
+	 */
 	public AABB getBoundingBox(Vec hookpos, Vec playerpos) {
-		this.updatePos(hookpos, playerpos, this.ropeLen);
 		Vec minvec = new Vec(hookpos);
 		Vec maxvec = new Vec(hookpos);
-		for (int i = 1; i < segments.size(); i++) {
-			Vec segpos = segments.get(i);
+		List<Vec> points = new ArrayList<>(segments);
+		points.add(playerpos);
+		for (Vec segpos : points) {
+			if (segpos == null) {
+				continue;
+			}
 			if (segpos.x < minvec.x) {
 				minvec.x = segpos.x;
 			} else if (segpos.x > maxvec.x) {
@@ -378,7 +432,6 @@ public class SegmentHandler {
 				maxvec.z = segpos.z;
 			}
 		}
-		AABB bb = new AABB(minvec.x, minvec.y, minvec.z, maxvec.x, maxvec.y, maxvec.z);
-		return bb;
+		return new AABB(minvec.x, minvec.y, minvec.z, maxvec.x, maxvec.y, maxvec.z);
 	}
 }

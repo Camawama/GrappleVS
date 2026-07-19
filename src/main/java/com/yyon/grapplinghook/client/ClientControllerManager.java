@@ -1,16 +1,17 @@
 package com.yyon.grapplinghook.client;
 
-import java.util.ConcurrentModificationException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.yyon.grapplinghook.GrappleMod;
+import com.yyon.grapplinghook.common.CommonSetup;
 import com.yyon.grapplinghook.config.GrappleConfig;
 import com.yyon.grapplinghook.controllers.AirfrictionController;
 import com.yyon.grapplinghook.controllers.ForcefieldController;
 import com.yyon.grapplinghook.controllers.GrappleController;
 import com.yyon.grapplinghook.enchantments.DoublejumpEnchantment;
 import com.yyon.grapplinghook.enchantments.SlidingEnchantment;
-import com.yyon.grapplinghook.enchantments.WallrunEnchantment;
 import com.yyon.grapplinghook.entities.grapplehook.GrapplehookEntity;
 import com.yyon.grapplinghook.items.EnderStaffItem;
 import com.yyon.grapplinghook.items.GrapplehookItem;
@@ -79,12 +80,9 @@ public class ClientControllerManager {
 
 		this.rocketFuel += this.rocketIncreaseTick;
 
-		try {
-			for (GrappleController controller : controllers.values()) {
-				controller.doClientTick();
-			}
-		} catch (ConcurrentModificationException e) {
-			System.out.println("ConcurrentModificationException caught");
+		// copy: doClientTick can unattach and mutate the controllers map while we iterate
+		for (GrappleController controller : new ArrayList<>(controllers.values())) {
+			controller.doClientTick();
 		}
 
 		if (this.rocketFuel > 1) {this.rocketFuel = 1;}
@@ -168,26 +166,25 @@ public class ClientControllerManager {
 			if (entity instanceof LivingEntity && ((LivingEntity) entity).onClimbable()) {
 				return false;
 			}
-			for (ItemStack stack : entity.getArmorSlots()) {
-				if (stack != null) {
-					Map<Enchantment, Integer> enchantments = EnchantmentHelper.getEnchantments(stack);
-					for (Enchantment enchant : enchantments.keySet()) {
-						if (enchant instanceof WallrunEnchantment) {
-							if (enchantments.get(enchant) >= 1) {
-								if (!ClientSetup.key_jumpanddetach.isDown() && !Minecraft.getInstance().options.keyJump.isDown()) {
-									BlockHitResult raytraceresult = GrapplemodUtils.rayTraceBlocks(entity.level(), Vec.positionVec(entity), Vec.positionVec(entity).add(new Vec(0, -1, 0)));
-									if (raytraceresult == null) {
-										double current_speed = Math.sqrt(Math.pow(motion.x, 2) + Math.pow(motion.z,  2));
-										if (current_speed >= GrappleConfig.getConf().enchantments.wallrun.wallrun_min_speed) {
-											return true;
-										}
-									}
-								}
-							}
+			if (isWearingWallrunEnchant(entity)) {
+				if (!ClientSetup.key_jumpanddetach.isDown() && !Minecraft.getInstance().options.keyJump.isDown()) {
+					BlockHitResult raytraceresult = GrapplemodUtils.rayTraceBlocks(entity.level(), Vec.positionVec(entity), Vec.positionVec(entity).add(new Vec(0, -1, 0)));
+					if (raytraceresult == null) {
+						double current_speed = Math.sqrt(Math.pow(motion.x, 2) + Math.pow(motion.z,  2));
+						if (current_speed >= GrappleConfig.getConf().enchantments.wallrun.wallrun_min_speed) {
+							return true;
 						}
-						break;
 					}
 				}
+			}
+		}
+		return false;
+	}
+
+	public static boolean isWearingWallrunEnchant(Entity entity) {
+		for (ItemStack stack : entity.getArmorSlots()) {
+			if (stack != null && EnchantmentHelper.getItemEnchantmentLevel(CommonSetup.wallrunEnchantment.get(), stack) >= 1) {
+				return true;
 			}
 		}
 		return false;
@@ -409,7 +406,7 @@ public class ClientControllerManager {
 		if (controller != null) {
 			controller.receiveEnderLaunch(x, y, z);
 		} else {
-			System.out.println("Couldn't find controller");
+			GrappleMod.LOGGER.warn("Could not find controller for ender launch");
 		}
 	}
 

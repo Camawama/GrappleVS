@@ -2,7 +2,7 @@ package com.yyon.grapplinghook.common;
 
 import com.yyon.grapplinghook.blocks.modifierblock.BlockGrappleModifier;
 import com.yyon.grapplinghook.blocks.modifierblock.TileEntityGrappleModifier;
-import com.yyon.grapplinghook.client.ClientProxy;
+import com.yyon.grapplinghook.client.ClientProxyInterface;
 import com.yyon.grapplinghook.enchantments.DoublejumpEnchantment;
 import com.yyon.grapplinghook.enchantments.SlidingEnchantment;
 import com.yyon.grapplinghook.enchantments.WallrunEnchantment;
@@ -97,13 +97,18 @@ public class CommonSetup {
 	
 
 	
-	public static CommonEventHandlers eventHandlers = new CommonEventHandlers();;
+	public static CommonEventHandlers eventHandlers; // constructed in the GrappleMod constructor
+
+	// bumped from 1.0: SegmentMessage and GrappleAttachMessage now carry per-bend ship data
+	public static final String NETWORK_PROTOCOL_VERSION = "2.0";
 
 	@SubscribeEvent
 	public static void init(FMLCommonSetupEvent event) {
-		network = NetworkRegistry.newSimpleChannel(simpleChannelRL, () -> "1.0",
-	            version -> true,
-	            version -> true);
+		// exact version match required when the mod is present on the other side; vanilla /
+		// modless connections are still allowed (they simply can't use grapple features)
+		network = NetworkRegistry.newSimpleChannel(simpleChannelRL, () -> NETWORK_PROTOCOL_VERSION,
+	            NetworkRegistry.acceptMissingOr(NETWORK_PROTOCOL_VERSION),
+	            NetworkRegistry.acceptMissingOr(NETWORK_PROTOCOL_VERSION));
 		int id = 0;
 		network.registerMessage(id++, PlayerMovementMessage.class, PlayerMovementMessage::encode, PlayerMovementMessage::new, PlayerMovementMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_SERVER));
 		network.registerMessage(id++, GrappleEndMessage.class, GrappleEndMessage::encode, GrappleEndMessage::new, GrappleEndMessage::onMessageReceived, Optional.of(NetworkDirection.PLAY_TO_SERVER));
@@ -132,7 +137,10 @@ public class CommonSetup {
 			(itemDisplayParameters,output)-> {
 				ITEMS.getEntries().forEach((registryObject)-> output.accept(new ItemStack(registryObject.get()))
 				);
-				ClientProxy.proxy.fillGrappleVariants(output);
+				// go through the sided interface (null on dedicated servers) instead of ClientProxy directly
+				if (ClientProxyInterface.proxy != null) {
+					ClientProxyInterface.proxy.fillGrappleVariants(output);
+				}
 			}).icon(()->new ItemStack(grapplingHookItem.get())).title(Component.translatable("itemGroup.tabGrapplemod")).build());
 
 

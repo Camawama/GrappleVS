@@ -172,7 +172,7 @@ public class Vec {
 	}
 	
 	public void print(){
-		System.out.println(this.toString());
+		GrappleMod.LOGGER.debug(this.toString());
 	}
 	
 	public String toString() {

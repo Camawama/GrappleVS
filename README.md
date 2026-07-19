@@ -1,67 +1,49 @@
-# Grappling Hook Mod for Minecraft
+# GrappleVS — Grappling Hook Mod with Valkyrien Skies Compatibility
 
-A mod which adds grappling hooks. The aim of this mod is to provide a fun way to get around large builds like cities.
+A fork of [yyon's Grappling Hook Mod](https://github.com/yyon/grapplemod) for **Forge 1.20.1** with
+compatibility for **[Valkyrien Skies 2](https://valkyrienskies.org/)** (2.4.x).
 
-This mod is for Forge only. No fabric version is planned at the moment.
+Grappling hooks can attach to VS ships, track them as they move and rotate, wrap their rope around
+ship hulls, and pay out rope when a hooked ship pulls away.
 
-1.16.5/1.18.2 versions requires Cloth Config API:  https://www.curseforge.com/minecraft/mc-mods/cloth-config-forge
+## Requirements
 
-## Mod Description & Downloads
+- Minecraft 1.20.1, Forge 47+
+- [Cloth Config API (Forge)](https://www.curseforge.com/minecraft/mc-mods/cloth-config-forge) — required
+- [Valkyrien Skies 2](https://modrinth.com/mod/valkyrien-skies) 2.4.x — **optional**; everything
+  works without it, ship integration activates when it's installed (VS itself requires Kotlin for Forge)
 
-[https://www.curseforge.com/minecraft/mc-mods/grappling-hook-mod](https://www.curseforge.com/minecraft/mc-mods/grappling-hook-mod)
+## Valkyrien Skies integration notes
+
+- Hook attachment positions and rope bend points on ships are stored in ship-local coordinates and
+  re-projected every tick, so ropes follow moving/rotating ships.
+- If a hooked ship moves away, rope is paid out up to the hook's max rope length before the rope snaps.
+- If the ship a hook is attached to unloads or is deleted, the hook detaches after a few seconds.
+- Known limitation: rope-bend *unwrap* math treats bend edges as world-axis-aligned, so ropes
+  wrapped around heavily rotated ships may unwrap slightly early or late.
 
 ## Setup for Developing
 
-1. Download the latest Minecraft Forge Mdk for the correct version of Minecraft from [https://files.minecraftforge.net/net/minecraftforge/forge/](https://files.minecraftforge.net/net/minecraftforge/forge/)
-2. Clone this repository into the src folder (e.g. `rm -r src; git clone git@github.com:yyon/grapplemod.git src`)
-3. Copy or symlink build.gradle and gradle.properties into the root of the Mdk
-4. Follow standard Forge Development setup (e.g. `./gradlew build`, see [https://mcforge.readthedocs.io/en/latest/gettingstarted/](https://mcforge.readthedocs.io/en/latest/gettingstarted/))
+1. Clone this repository
+2. `./gradlew build` (standard [Forge development setup](https://docs.minecraftforge.net/en/1.20.1/gettingstarted/))
+3. `./gradlew runClient` to test in-game
 
-## Project Structure
+The manual test checklist lives in the `Testing` file, including a Valkyrien Skies section.
 
-Currently, the versions of this mod for Minecraft 1.12, 1.16, and 1.18 are on branches 1.12, 1.16.5, and 1.18 respectively.
+## Upstream project
 
-### Code Structure Overview
-
-- main/java/com/yyon/grapplinghook/client: Client-side code. Initialization in ClientSetup.java and event handlers in ClientEventHandlers.java. All non-client-side code must call ClientProxy.java code through ClientProxyInterface.java.
-- main/java/com/yyon/grapplinghook/common: Code that runs on both client-side and server-side. Initializiation in CommonSetup.java and event handlers in CommonEventHandlers.java.
-- main/java/com/yyon/grapplinghook/server: Server-side code. 
-- main/java/com/yyon/grapplinghook/blocks: All Minecraft blocks added by this mod.
-- main/java/com/yyon/grapplinghook/items: All Minecraft items added by this mod.
-- main/java/com/yyon/grapplinghook/entities: All Minecraft entities added by this mod.
-- main/java/com/yyon/grapplinghook/enchantments: All Minecraft enchantments added by this mod.
-- main/java/com/yyon/grapplinghook/controllers: Code for physics / controlling player movement while on a grappling hook, etc.
-- main/java/com/yyon/grapplinghook/network: Custom network packets which are sent between client and server
-- main/java/com/yyon/grapplinghook/config: Configuration parameters provided by this mod that allows users to configure the parameters through a config file or cloth config
-- main/java/com/yyon/grapplinghook/integrations: Integration of this mod with other mods
-- main/java/com/yyon/grapplinghook/utils: Miscellaneous utilities
+Original mod by yyon: [CurseForge](https://www.curseforge.com/minecraft/mc-mods/grappling-hook-mod) ·
+[GitHub](https://github.com/yyon/grapplemod). Licensed GPL-3.0, as is this fork (see `COPYING`).
 
 ## Credits
 
-1.18 update by Nyfaria
+Fork/VS compatibility by Cama.
 
-Textures by Mayesnake
+Upstream credits:
 
-Bug fixes:
-
-- Random832 (Prevent tick from running when shootingEntity is null)
-
-- LachimHeigrim (Fix for #37: removed forgotten debug prints)
-
-Languages:
-
-- Blueberryy (Russian)
-
-- Neerwan (French)
-
-- Eufranio (Brazillian Portugese)
-
-Sound Effects:
-
-- Iwan Gabovitch (Double jump sound effects (modified by me): https://opengameart.org/content/swish-bamboo-stick-weapon-swhoshes - Copyright Iwan Gabovitch 2009 Under the CC0 1.0 Universal license)
-
-- Outroelison (Ender staff sound effect (modified by me): https://freesound.org/people/outroelison/sounds/150950/ - Copyright outroelison 2012 under the CC0 1.0 Universal License)
-
-Bug finding:
-
-- Shivaxi
+- 1.18 update by Nyfaria
+- Textures by Mayesnake
+- Bug fixes: Random832, LachimHeigrim
+- Languages: Blueberryy (Russian), Neerwan (French), Eufranio (Brazilian Portuguese)
+- Sound effects: Iwan Gabovitch (double jump, CC0), Outroelison (ender staff, CC0)
+- Bug finding: Shivaxi

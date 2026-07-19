@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook;
 
+import com.yyon.grapplinghook.common.CommonEventHandlers;
 import com.yyon.grapplinghook.common.CommonSetup;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
@@ -34,8 +35,6 @@ import org.apache.logging.log4j.Logger;
 @Mod(GrappleMod.MODID)
 public class GrappleMod {
     public static final String MODID = "grapplemod";
-    
-    public static final String VERSION = "1.16.5-v12.2";
 
     public static final Logger LOGGER = LogManager.getLogger();
 
@@ -48,5 +47,8 @@ public class GrappleMod {
         CommonSetup.BLOCK_ENTITY_TYPES.register(bus);
         CommonSetup.TABS.register(bus);
 
+        // explicit construction instead of a static-initializer side effect: registers the
+        // forge-bus event handlers and the AutoConfig serializer
+        CommonSetup.eventHandlers = new CommonEventHandlers();
     }
 }

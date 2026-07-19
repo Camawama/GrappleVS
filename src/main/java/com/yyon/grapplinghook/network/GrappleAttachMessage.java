@@ -46,6 +46,8 @@ public class GrappleAttachMessage extends BaseMessageClient {
 	public LinkedList<Vec> segments;
 	public LinkedList<Direction> segmentTopSides;
 	public LinkedList<Direction> segmentBottomSides;
+	public LinkedList<Long> segmentShipIds;
+	public LinkedList<Vec> segmentShipLocals;
 	public GrappleCustomization custom;
     public long shipId;
     public double localX;
@@ -56,7 +58,7 @@ public class GrappleAttachMessage extends BaseMessageClient {
     	super(buf);
     }
 
-    public GrappleAttachMessage(int id, double x, double y, double z, int controlid, int entityid, BlockPos blockpos, LinkedList<Vec> segments, LinkedList<Direction> segmenttopsides, LinkedList<Direction> segmentbottomsides, GrappleCustomization custom) {
+    public GrappleAttachMessage(int id, double x, double y, double z, int controlid, int entityid, BlockPos blockpos, SegmentHandler segmentHandler, GrappleCustomization custom, long shipId, double localX, double localY, double localZ) {
     	this.id = id;
         this.x = x;
         this.y = y;
@@ -64,15 +66,12 @@ public class GrappleAttachMessage extends BaseMessageClient {
         this.controlId = controlid;
         this.entityId = entityid;
         this.blockPos = blockpos;
-        this.segments = segments;
-        this.segmentTopSides = segmenttopsides;
-        this.segmentBottomSides = segmentbottomsides;
+        this.segments = segmentHandler.segments;
+        this.segmentTopSides = segmentHandler.segmentTopSides;
+        this.segmentBottomSides = segmentHandler.segmentBottomSides;
+        this.segmentShipIds = segmentHandler.segmentShipIds;
+        this.segmentShipLocals = segmentHandler.segmentShipLocals;
         this.custom = custom;
-        this.shipId = -1;
-    }
-
-    public GrappleAttachMessage(int id, double x, double y, double z, int controlid, int entityid, BlockPos blockpos, LinkedList<Vec> segments, LinkedList<Direction> segmenttopsides, LinkedList<Direction> segmentbottomsides, GrappleCustomization custom, long shipId, double localX, double localY, double localZ) {
-        this(id, x, y, z, controlid, entityid, blockpos, segments, segmenttopsides, segmentbottomsides, custom);
         this.shipId = shipId;
         this.localX = localX;
         this.localY = localY;
@@ -90,30 +89,40 @@ public class GrappleAttachMessage extends BaseMessageClient {
         int blocky = buf.readInt();
         int blockz = buf.readInt();
         this.blockPos = new BlockPos(blockx, blocky, blockz);
-        
+
         this.custom = new GrappleCustomization();
         this.custom.readFromBuf(buf);
-        
+
         int size = buf.readInt();
         this.segments = new LinkedList<Vec>();
         this.segmentBottomSides = new LinkedList<Direction>();
         this.segmentTopSides = new LinkedList<Direction>();
+        this.segmentShipIds = new LinkedList<Long>();
+        this.segmentShipLocals = new LinkedList<Vec>();
 
 		segments.add(new Vec(0, 0, 0));
 		segmentBottomSides.add(null);
 		segmentTopSides.add(null);
-		
+		segmentShipIds.add(SegmentHandler.NO_SHIP);
+		segmentShipLocals.add(null);
+
 		for (int i = 1; i < size-1; i++) {
         	this.segments.add(new Vec(buf.readDouble(), buf.readDouble(), buf.readDouble()));
         	this.segmentBottomSides.add(buf.readEnum(Direction.class));
         	this.segmentTopSides.add(buf.readEnum(Direction.class));
+        	long bendShipId = buf.readLong();
+        	Vec bendLocal = new Vec(buf.readDouble(), buf.readDouble(), buf.readDouble());
+        	this.segmentShipIds.add(bendShipId);
+        	this.segmentShipLocals.add(bendShipId != SegmentHandler.NO_SHIP ? bendLocal : null);
         }
-		
+
 		segments.add(new Vec(0, 0, 0));
 		segmentBottomSides.add(null);
 		segmentTopSides.add(null);
+		segmentShipIds.add(SegmentHandler.NO_SHIP);
+		segmentShipLocals.add(null);
 
-        if (buf.readableBytes() > 0) {
+        if (buf.readBoolean()) {
             this.shipId = buf.readLong();
             this.localX = buf.readDouble();
             this.localY = buf.readDouble();
@@ -133,9 +142,9 @@ public class GrappleAttachMessage extends BaseMessageClient {
         buf.writeInt(this.blockPos.getX());
         buf.writeInt(this.blockPos.getY());
         buf.writeInt(this.blockPos.getZ());
-        
+
         this.custom.writeToBuf(buf);
-        
+
         buf.writeInt(this.segments.size());
         for (int i = 1; i < this.segments.size()-1; i++) {
         	buf.writeDouble(this.segments.get(i).x);
@@ -143,8 +152,16 @@ public class GrappleAttachMessage extends BaseMessageClient {
         	buf.writeDouble(this.segments.get(i).z);
         	buf.writeEnum(this.segmentBottomSides.get(i));
         	buf.writeEnum(this.segmentTopSides.get(i));
+        	long bendShipId = this.segmentShipIds.get(i);
+        	Vec bendLocal = this.segmentShipLocals.get(i);
+        	buf.writeLong(bendShipId);
+        	buf.writeDouble(bendLocal != null ? bendLocal.x : 0);
+        	buf.writeDouble(bendLocal != null ? bendLocal.y : 0);
+        	buf.writeDouble(bendLocal != null ? bendLocal.z : 0);
         }
 
+        // explicit flag instead of trailing-bytes sniffing, so fields can be appended safely later
+        buf.writeBoolean(this.shipId != -1);
         if (this.shipId != -1) {
             buf.writeLong(this.shipId);
             buf.writeDouble(this.localX);
@@ -172,9 +189,13 @@ public class GrappleAttachMessage extends BaseMessageClient {
         	segmenthandler.segments = this.segments;
         	segmenthandler.segmentBottomSides = this.segmentBottomSides;
         	segmenthandler.segmentTopSides = this.segmentTopSides;
+        	segmenthandler.segmentShipIds = this.segmentShipIds;
+        	segmenthandler.segmentShipLocals = this.segmentShipLocals;
         	
         	Entity player = world.getEntity(this.entityId);
-        	segmenthandler.forceSetPos(new Vec(this.x, this.y, this.z), Vec.positionVec(player));
+        	// player entity may not be resolved on this client yet (respawn/dimension-change race)
+        	Vec playerpos = (player != null) ? Vec.positionVec(player) : new Vec(this.x, this.y, this.z);
+        	segmenthandler.forceSetPos(new Vec(this.x, this.y, this.z), playerpos);
     	} else {
     	}
     	            	

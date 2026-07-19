@@ -226,3 +226,18 @@
             - wallrunjump_sound_volume
             - rocket_sound_volume
             - enderstaff_sound_volume
+ - valkyrien skies (with VS 2.4.x installed)
+    - attach hook to a stationary ship block
+    - attach hook to a moving ship; check hook follows the ship
+    - swing from a hook attached to a moving ship
+    - hooked ship flies away: check rope pays out to max length, then snaps
+    - rope wraps around a ship hull corner; check bend follows the ship as it moves
+    - rope unwraps when swinging back around a ship corner
+    - hook attached to ship, ship deleted (kill command / disassembly): check hook detaches within a few seconds
+    - hook attached to ship, walk far away so ship unloads: check hook detaches
+    - break the ship block the hook is attached to: check rope detaches
+    - throw hook at a rotated ship: check hook lands and sits flush on the hull
+    - wallrun along a ship hull
+    - magnet hook near a ship
+    - check everything above on a dedicated server
+    - check the mod works normally with VS NOT installed (client and dedicated server)

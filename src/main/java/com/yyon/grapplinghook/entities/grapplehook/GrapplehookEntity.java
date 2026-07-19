@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook.entities.grapplehook;
 
+import com.yyon.grapplinghook.GrappleMod;
 import com.yyon.grapplinghook.client.ClientProxyInterface;
 import com.yyon.grapplinghook.common.CommonSetup;
 import com.yyon.grapplinghook.config.GrappleConfig;
@@ -7,6 +8,7 @@ import com.yyon.grapplinghook.config.GrappleConfigUtils;
 import com.yyon.grapplinghook.integrations.ValkyrienSkiesIntegration;
 import com.yyon.grapplinghook.network.GrappleAttachMessage;
 import com.yyon.grapplinghook.network.GrappleAttachPosMessage;
+import com.yyon.grapplinghook.network.GrappleDetachMessage;
 import com.yyon.grapplinghook.server.ServerControllerManager;
 import com.yyon.grapplinghook.utils.GrappleCustomization;
 import com.yyon.grapplinghook.utils.GrapplemodUtils;
@@ -34,7 +36,6 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraftforge.entity.IEntityAdditionalSpawnData;
-import net.minecraftforge.fml.ModList;
 import net.minecraftforge.network.NetworkHooks;
 import net.minecraftforge.network.PacketDistributor;
 
@@ -117,6 +118,15 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 	public Vec attach_dir = null;
 
+	// Valkyrien Skies: ticks in a row the attached ship failed to resolve (unloaded/deleted)
+	private static final int SHIP_UNRESOLVED_DETACH_TICKS = 60;
+	private int shipUnresolvedTicks = 0;
+
+	/** Ship id this hook is attached to, or -1. Safe to call without VS installed. */
+	public long getAttachedShipId() {
+		return this.getPersistentData().contains("vs_ship_id") ? this.getPersistentData().getLong("vs_ship_id") : -1;
+	}
+
 	@Override
 	public void writeSpawnData(FriendlyByteBuf data)
 	{
@@ -124,7 +134,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		data.writeBoolean(this.rightHand);
 		data.writeBoolean(this.isDouble);
 		if (this.customization == null) {
-			System.out.println("error: customization null");
+			GrappleMod.LOGGER.error("Customization is null when writing spawn data");
 		}
 		this.customization.writeToBuf(data);
         
@@ -183,6 +193,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 	public void tick() {
 		if (this.shootingEntityID == 0 || this.shootingEntity == null) { // removes ghost grappling hooks
 			this.remove(RemovalReason.DISCARDED);
+			return;
 		}
 
 		if (this.firstAttach) {
@@ -193,8 +204,23 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 		if (this.attached) {
 			this.setDeltaMovement(0, 0, 0);
-			if (ModList.get().isLoaded("valkyrienskies")) {
-				ValkyrienSkiesIntegration.updateShipAttachment(this, this.level());
+			if (GrapplemodUtils.vsLoaded()) {
+				boolean shipResolved = ValkyrienSkiesIntegration.updateShipAttachment(this, this.level());
+				if (!this.level().isClientSide) {
+					if (!shipResolved) {
+						this.shipUnresolvedTicks++;
+						if (this.shipUnresolvedTicks > SHIP_UNRESOLVED_DETACH_TICKS) {
+							// the ship was unloaded or deleted: release the hook instead of leaving it frozen mid-air
+							int ownerId = this.shootingEntityID;
+							GrapplemodUtils.sendToCorrectClient(new GrappleDetachMessage(ownerId), ownerId, this.level());
+							ServerControllerManager.attached.remove(ownerId);
+							this.removeServer();
+							return;
+						}
+					} else {
+						this.shipUnresolvedTicks = 0;
+					}
+				}
 			}
 		}
 
@@ -204,7 +230,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 			if (this.shootingEntity != null)  {
 				if (!this.attached) {
 					if (this.segmentHandler.hookPastBend(this.r)) {
-						System.out.println("around bend");
+						GrappleMod.LOGGER.debug("Hook thrown past bend, attaching at bend");
 						Vec farthest = this.segmentHandler.getFarthest();
 						this.serverAttach(this.segmentHandler.getBendBlock(1), farthest, null);
 					}
@@ -262,7 +288,6 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 		// magnet attraction
 		if (!this.attached && this.customization.attract && Vec.positionVec(this).sub(Vec.positionVec(this.shootingEntity)).length() > this.customization.attractradius) {
-			if (this.shootingEntity == null) {return;}
 			if (!this.foundBlock) {
 				if (!this.level().isClientSide) {
 					Vec playerpos = Vec.positionVec(this.shootingEntity);
@@ -417,7 +442,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 				this.serverAttach(blockpos, vec3, blockhit.getDirection());
 			} else {
-				System.out.println("unknown impact?");
+				GrappleMod.LOGGER.warn("Unknown grappling hook impact type");
 			}
 		}
 	}
@@ -455,21 +480,30 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 
 		//west -x
 		//north -z
-		Vec curpos = Vec.positionVec(this);
+		Vec nudge = new Vec(0, 0, 0);
 		if (sideHit == Direction.DOWN) {
-			curpos.y -= 0.3;
+			nudge.y -= 0.3;
 		} else if (sideHit == Direction.WEST) {
-			curpos.x -= 0.05;
+			nudge.x -= 0.05;
 		} else if (sideHit == Direction.NORTH) {
-			curpos.z -= 0.05;
+			nudge.z -= 0.05;
 		} else if (sideHit == Direction.SOUTH) {
-			curpos.z += 0.05;
+			nudge.z += 0.05;
 		} else if (sideHit == Direction.EAST) {
-			curpos.x += 0.05;
+			nudge.x += 0.05;
 		} else if (sideHit == Direction.UP) {
-			curpos.y += 0.05;
+			nudge.y += 0.05;
 		}
-		curpos.setPos(this);
+
+		// on ships the hit side is shipyard-space, so the nudge is applied in shipyard space there
+		boolean attachedToShip = false;
+		if (GrapplemodUtils.vsLoaded()) {
+			attachedToShip = ValkyrienSkiesIntegration.attachToShip(this, this.level(), Vec.positionVec(this).toVec3d(), blockpos, nudge.toVec3d());
+		}
+		if (!attachedToShip) {
+			Vec curpos = Vec.positionVec(this).add(nudge);
+			curpos.setPos(this);
+		}
 
 		this.setDeltaMovement(0, 0, 0);
 
@@ -477,10 +511,6 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 		this.firstAttach = true;
 		ServerControllerManager.attached.add(this.shootingEntityID);
 
-		if (ModList.get().isLoaded("valkyrienskies")) {
-			ValkyrienSkiesIntegration.attachToShip(this, this.level(), curpos.toVec3d(), blockpos);
-		}
-        
         long shipId = -1;
         double localX = 0, localY = 0, localZ = 0;
         if (this.getPersistentData().contains("vs_ship_id")) {
@@ -490,7 +520,7 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
             localZ = this.getPersistentData().getDouble("vs_local_z");
         }
 
-		GrapplemodUtils.sendToCorrectClient(new GrappleAttachMessage(this.getId(), this.position().x, this.position().y, this.position().z, this.getControlId(), this.shootingEntityID, blockpos, this.segmentHandler.segments, this.segmentHandler.segmentTopSides, this.segmentHandler.segmentBottomSides, this.customization, shipId, localX, localY, localZ), this.shootingEntityID, this.level());
+		GrapplemodUtils.sendToCorrectClient(new GrappleAttachMessage(this.getId(), this.position().x, this.position().y, this.position().z, this.getControlId(), this.shootingEntityID, blockpos, this.segmentHandler, this.customization, shipId, localX, localY, localZ), this.shootingEntityID, this.level());
 
 		GrappleAttachPosMessage msg = new GrappleAttachPosMessage(this.getId(), this.position().x, this.position().y, this.position().z);
 		CommonSetup.network.send(PacketDistributor.TRACKING_CHUNK.with(() -> this.level().getChunkAt(BlockPos.containing(this.position().x, this.position().y, this.position().z))), msg);
@@ -529,21 +559,25 @@ public class GrapplehookEntity extends ThrowableItemProjectile implements IEntit
 	// used for magnet attraction
 	public BlockPos check(Vec p, HashMap<BlockPos, Boolean> checkedset) {
 		int radius = (int) Math.floor(this.customization.attractradius);
+		double radiusSq = this.customization.attractradius * this.customization.attractradius;
 		BlockPos closestpos = null;
 		double closestdist = 0;
 		for (int x = (int)p.x - radius; x <= (int)p.x + radius; x++) {
 			for (int y = (int)p.y - radius; y <= (int)p.y + radius; y++) {
 				for (int z = (int)p.z - radius; z <= (int)p.z + radius; z++) {
+					// sphere culling: skip cube corners outside the attraction radius
+					double dx = x - p.x, dy = y - p.y, dz = z - p.z;
+					if (dx * dx + dy * dy + dz * dz > radiusSq) {
+						continue;
+					}
 					BlockPos pos = new BlockPos(x, y, z);
-					if (pos != null) {
-						if (hasBlock(pos, checkedset)) {
-							Vec distvec = new Vec(pos.getX(), pos.getY(), pos.getZ());
-							distvec.sub_ip(p);
-							double dist = distvec.length();
-							if (closestpos == null || dist < closestdist) {
-								closestpos = pos;
-								closestdist = dist;
-							}
+					if (hasBlock(pos, checkedset)) {
+						Vec distvec = new Vec(pos.getX(), pos.getY(), pos.getZ());
+						distvec.sub_ip(p);
+						double dist = distvec.length();
+						if (closestpos == null || dist < closestdist) {
+							closestpos = pos;
+							closestdist = dist;
 						}
 					}
 				}

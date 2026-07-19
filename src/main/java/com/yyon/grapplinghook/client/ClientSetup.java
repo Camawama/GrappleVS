@@ -103,49 +103,49 @@ public class ClientSetup {
 	}
 	
 	public void registerPropertyOverride() {
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("rocket"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "rocket"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyRocket(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("double"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "double"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyDouble(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("motor"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "motor"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyMotor(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("smart"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "smart"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertySmart(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("enderstaff"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "enderstaff"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyEnderstaff(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("magnet"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "magnet"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyMagnet(stack, world, entity) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("attached"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "attached"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				if (entity == null) {return 0;}
 				return (ClientControllerManager.controllers.containsKey(entity.getId()) && !(ClientControllerManager.controllers.get(entity.getId()) instanceof AirfrictionController)) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.forcefieldItem.get(), new ResourceLocation("attached"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.forcefieldItem.get(), new ResourceLocation("grapplemod", "attached"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				if (entity == null) {return 0;}
 				return (ClientControllerManager.controllers.containsKey(entity.getId()) && ClientControllerManager.controllers.get(entity.getId()) instanceof ForcefieldController) ? 1 : 0;
 			}
 		});
-		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("hook"), new ItemPropertyFunction() {
+		ItemProperties.register(CommonSetup.grapplingHookItem.get(), new ResourceLocation("grapplemod", "hook"), new ItemPropertyFunction() {
 			public float call(ItemStack stack, @Nullable ClientLevel world, @Nullable LivingEntity entity, int seed) {
 				return CommonSetup.grapplingHookItem.get().getPropertyHook(stack, world, entity) ? 1 : 0;
 			}

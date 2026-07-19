@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook.common;
 
+import com.yyon.grapplinghook.GrappleMod;
 import com.yyon.grapplinghook.config.GrappleConfig;
 import com.yyon.grapplinghook.entities.grapplehook.GrapplehookEntity;
 import com.yyon.grapplinghook.items.GrapplehookItem;
@@ -23,6 +24,7 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingFallEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedInEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent;
 import net.minecraftforge.event.level.BlockEvent.BreakEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -123,7 +125,28 @@ public class CommonEventHandlers {
 		if (e.getEntity() instanceof ServerPlayer) {
 			CommonSetup.network.send(PacketDistributor.PLAYER.with(() -> (ServerPlayer) e.getEntity()), new LoggedInMessage(GrappleConfig.getConf()));
 		} else {
-			System.out.println("Not an PlayerEntityMP");
+			GrappleMod.LOGGER.warn("Logged-in entity is not a ServerPlayer");
 		}
+	}
+
+	// the static hook/controller maps are keyed by entity/entity-id; clean them up on logout
+	// so they don't leak player and hook references across sessions
+	@SubscribeEvent
+	public void onPlayerLoggedOutEvent(PlayerLoggedOutEvent e) {
+		if (!(e.getEntity() instanceof ServerPlayer player)) {
+			return;
+		}
+		int id = player.getId();
+		ServerControllerManager.attached.remove(id);
+		HashSet<GrapplehookEntity> hooks = ServerControllerManager.allGrapplehookEntities.remove(id);
+		if (hooks != null) {
+			for (GrapplehookEntity hookEntity : hooks) {
+				if (hookEntity != null && hookEntity.isAlive()) {
+					hookEntity.removeServer();
+				}
+			}
+		}
+		GrapplehookItem.grapplehookEntitiesLeft.remove(player);
+		GrapplehookItem.grapplehookEntitiesRight.remove(player);
 	}
 }

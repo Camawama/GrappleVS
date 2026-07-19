@@ -37,18 +37,22 @@ public class SegmentMessage extends BaseMessageClient {
 	public Vec pos;
 	public Direction topFacing;
 	public Direction bottomFacing;
+	public long shipId;
+	public Vec shipLocal;
 
     public SegmentMessage(FriendlyByteBuf buf) {
     	super(buf);
     }
 
-    public SegmentMessage(int id, boolean add, int index, Vec pos, Direction topfacing, Direction bottomfacing) {
+    public SegmentMessage(int id, boolean add, int index, Vec pos, Direction topfacing, Direction bottomfacing, long shipId, Vec shipLocal) {
     	this.id = id;
     	this.add = add;
     	this.index = index;
     	this.pos = pos;
     	this.topFacing = topfacing;
     	this.bottomFacing = bottomfacing;
+    	this.shipId = shipId;
+    	this.shipLocal = shipLocal;
     }
 
     public void decode(FriendlyByteBuf buf) {
@@ -58,6 +62,8 @@ public class SegmentMessage extends BaseMessageClient {
     	this.pos = new Vec(buf.readDouble(), buf.readDouble(), buf.readDouble());
     	this.topFacing = buf.readEnum(Direction.class);
     	this.bottomFacing = buf.readEnum(Direction.class);
+    	this.shipId = buf.readLong();
+    	this.shipLocal = new Vec(buf.readDouble(), buf.readDouble(), buf.readDouble());
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -69,6 +75,10 @@ public class SegmentMessage extends BaseMessageClient {
     	buf.writeDouble(pos.z);
     	buf.writeEnum(this.topFacing);
     	buf.writeEnum(this.bottomFacing);
+    	buf.writeLong(this.shipId);
+    	buf.writeDouble(shipLocal.x);
+    	buf.writeDouble(shipLocal.y);
+    	buf.writeDouble(shipLocal.z);
     }
 
     @OnlyIn(Dist.CLIENT)
@@ -78,13 +88,17 @@ public class SegmentMessage extends BaseMessageClient {
     	if (grapple == null) {
     		return;
     	}
-    	
+
     	if (grapple instanceof GrapplehookEntity) {
     		SegmentHandler segmenthandler = ((GrapplehookEntity) grapple).segmentHandler;
     		if (this.add) {
-    			segmenthandler.actuallyAddSegment(this.index, this.pos, this.bottomFacing, this.topFacing);
+    			Vec local = (this.shipId != SegmentHandler.NO_SHIP) ? this.shipLocal : null;
+    			segmenthandler.actuallyAddSegment(this.index, this.pos, this.bottomFacing, this.topFacing, this.shipId, local);
     		} else {
-    			segmenthandler.removeSegment(this.index);
+    			// index bounds can go stale if a local unwrap raced this message
+    			if (this.index >= 1 && this.index < segmenthandler.segments.size() - 1) {
+    				segmenthandler.removeSegment(this.index);
+    			}
     		}
     	} else {
     	}

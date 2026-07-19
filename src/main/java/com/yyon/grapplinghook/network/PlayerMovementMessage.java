@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook.network;
 
+import com.yyon.grapplinghook.GrappleMod;
 import com.yyon.grapplinghook.utils.Vec;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
@@ -56,8 +57,7 @@ public class PlayerMovementMessage extends BaseMessageServer {
 	    	this.my = buf.readDouble();
 	    	this.mz = buf.readDouble();
     	} catch (Exception e) {
-    		System.out.print("Playermovement error: ");
-    		System.out.println(buf);
+    		GrappleMod.LOGGER.warn("Failed to decode player movement packet: {}", buf, e);
     	}
     }
 
@@ -72,23 +72,45 @@ public class PlayerMovementMessage extends BaseMessageServer {
         
     }
 
+    // Sanity bounds: legitimate grapple movement never teleports further than this in one
+    // message, and never reaches this speed per tick. Values above these are ignored.
+    private static final double MAX_DISPLACEMENT_PER_MESSAGE = 16.0;
+    private static final double MAX_SPEED_PER_TICK = 16.0;
+
     public void processMessage(NetworkEvent.Context ctx) {
     	final ServerPlayer referencedPlayer = ctx.getSender();
-        
-		if(referencedPlayer.getId() == this.entityId) {
-			new Vec(this.x, this.y, this.z).setPos(referencedPlayer);
-			new Vec(this.mx, this.my, this.mz).setMotion(referencedPlayer);
 
-			referencedPlayer.connection.resetPosition();
-			
-			if (!referencedPlayer.onGround()) {
-				if (this.my >= 0) {
-					referencedPlayer.fallDistance = 0;
-				} else {
-					double gravity = 0.05 * 2;
-					// d = v^2 / 2g
-					referencedPlayer.fallDistance = (float) (Math.pow(this.my, 2) / (2 * gravity));
-				}
+		if (referencedPlayer == null || referencedPlayer.getId() != this.entityId) {
+			return;
+		}
+
+		// reject non-finite and implausible values instead of trusting the client blindly
+		if (!Double.isFinite(this.x) || !Double.isFinite(this.y) || !Double.isFinite(this.z)
+				|| !Double.isFinite(this.mx) || !Double.isFinite(this.my) || !Double.isFinite(this.mz)) {
+			return;
+		}
+		Vec displacement = new Vec(this.x, this.y, this.z).sub(Vec.positionVec(referencedPlayer));
+		if (displacement.length() > MAX_DISPLACEMENT_PER_MESSAGE) {
+			GrappleMod.LOGGER.warn("Ignoring implausible movement packet from {} (displacement {})",
+					referencedPlayer.getScoreboardName(), displacement.length());
+			return;
+		}
+		if (new Vec(this.mx, this.my, this.mz).length() > MAX_SPEED_PER_TICK) {
+			return;
+		}
+
+		new Vec(this.x, this.y, this.z).setPos(referencedPlayer);
+		new Vec(this.mx, this.my, this.mz).setMotion(referencedPlayer);
+
+		referencedPlayer.connection.resetPosition();
+
+		if (!referencedPlayer.onGround()) {
+			if (this.my >= 0) {
+				referencedPlayer.fallDistance = 0;
+			} else {
+				double gravity = 0.05 * 2;
+				// d = v^2 / 2g
+				referencedPlayer.fallDistance = (float) (Math.pow(this.my, 2) / (2 * gravity));
 			}
 		}
     }

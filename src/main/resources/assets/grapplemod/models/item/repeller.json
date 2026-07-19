@@ -4,6 +4,6 @@
         "layer0": "grapplemod:item/repeller"
     },
 	"overrides": [
-	    { "predicate": { "attached": 1 }, "model": "grapplemod:item/repelleron" }
+	    { "predicate": { "grapplemod:attached": 1 }, "model": "grapplemod:item/repelleron" }
 	]
 }

@@ -8,11 +8,10 @@ buildscript {
     dependencies {
         classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '5.1.+', changing: true
         classpath 'org.parchmentmc:librarian:1.+'
-        classpath group: 'org.spongepowered', name: 'mixingradle', version: '0.7.+'
+        // Only used for its createSrgToMcp task + dev-run refmap remapping (VS mixins);
+        // we ship no mixins of our own, so no annotation processor / mixin config here.
+        classpath 'org.spongepowered:mixingradle:0.7.+'
     }
-}
-plugins {
-    id 'com.github.johnrengelman.shadow' version '7.1.0'
 }
 apply plugin: 'net.minecraftforge.gradle'
 apply plugin: 'org.parchmentmc.librarian.forgegradle'
@@ -45,6 +44,11 @@ minecraft {
 
             property 'forge.logging.console.level', 'debug'
 
+            // Dev runtime uses mojmap names, but fg.deobf leaves dependency refmaps in SRG.
+            // Remap refmap entries (VS's mixins) to dev names via MixinGradle's createSrgToMcp.
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+
 
             if (project.hasProperty('mc_uuid')) {
 
@@ -73,6 +77,9 @@ minecraft {
 
             property 'forge.logging.console.level', 'debug'
 
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
+
             mods {
                 "${mod_id}" {
                     source sourceSets.main
@@ -86,6 +93,9 @@ minecraft {
             property 'forge.logging.markers', 'REGISTRIES'
 
             property 'forge.logging.console.level', 'debug'
+
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${projectDir}/build/createSrgToMcp/output.srg"
 
             args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
 
@@ -103,28 +113,31 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 repositories {
     // 1. Maven Central MUST be top to fix the 'typetools' error
     mavenCentral()
-    
-    // SpongePowered for Mixin
-    maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
 
-    maven { url 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/' }
-    maven {
-        name = '100Media'
-        url = 'https://maven.100media.dev/'
-    }
-    maven { url "https://maven.shedaniel.me/" }
+    // Forge maven before the VS proxy: the VS reposilite claims some forge modules (e.g. mergetool)
+    // without serving all their classifier jars
+    maven { url = 'https://maven.minecraftforge.net' }
+
+    maven { url = "https://maven.shedaniel.me/" }
     mavenLocal()
-    
-    // Valkyrien Skies & Kotlin Repos
+
+    // Kotlin for Forge (content-filtered so no other repo claims it and vice versa)
+    maven {
+        url = 'https://thedarkcolour.github.io/KotlinForForge/'
+        content { includeGroup 'thedarkcolour' }
+    }
+
+    // Valkyrien Skies; also mirrors VS's transitive deps (jitpack etc.), so no content filter.
+    // Kept after the KFF and Forge mavens because its proxy half-claims some of their modules.
     maven { url = 'https://maven.valkyrienskies.org' }
-    maven { url = 'https://thedarkcolour.github.io/KotlinForForge/' }
-    
+
     // Modrinth Maven for VS 2.4.0
     maven {
         name = "Modrinth"
         url = "https://api.modrinth.com/maven"
+        content { includeGroup 'maven.modrinth' }
     }
-    
+
     // JEI
     maven {
         name = "Jared's maven"
@@ -132,43 +145,27 @@ repositories {
     }
 }
 
-mixin {
-    add sourceSets.main, "${mod_id}.refmap.json"
-
-    config "${mod_id}.mixins.json"
-
-    debug.export = true
-}
-
-configurations {
-    implementation.extendsFrom shadow
-}
-
 dependencies {
 
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Mixin annotation processor - generates the refmap
-    annotationProcessor "org.spongepowered:mixin:${mixin_version}:processor"
-
-    // Capability Syncer
-    shadow fg.deobf("dev._100media.capabilitysyncer:capabilitysyncer:${capabilitysyncer_version}")
     implementation fg.deobf("me.shedaniel.cloth:cloth-config-forge:11.1.106")
 
     // --- VS2 DEPENDENCIES ---
-    implementation fg.deobf("thedarkcolour:kotlinforforge:4.11.0")
-    implementation fg.deobf("org.valkyrienskies:valkyrienskies-120-forge:2.4.0")
+    // KFF contains no Minecraft classes, so it must not go through fg.deobf (remapping it fails)
+    implementation "thedarkcolour:kotlinforforge:4.11.0"
+    implementation fg.deobf("org.valkyrienskies:valkyrienskies-120-forge:2.4.11")
 
-    // Core API: Using '+' allows Gradle to find the version matching the mod automatically
-    implementation "org.valkyrienskies.core:api:+"
-    implementation "org.valkyrienskies.core:impl:+"
-    implementation "org.valkyrienskies.core:util:+"
+    // Core API pinned to the version the VS forge jar ships with (see its POM) for reproducible builds
+    implementation "org.valkyrienskies.core:api:${vs_core_version}"
+    implementation "org.valkyrienskies.core:impl:${vs_core_version}"
+    implementation "org.valkyrienskies.core:util:${vs_core_version}"
 
     implementation("org.joml:joml:1.10.5")
-    
+
     // Explicitly add typetools to resolve the missing dependency error
     implementation "net.jodah:typetools:0.6.3"
-    
+
     // JEI
     compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-common-api:${jei_version}")
     compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}")
@@ -177,7 +174,7 @@ dependencies {
 
 // This block of code expands all the gradle properties in the specified resource targets.
 // It copies them into the targets and expands all the defined properties.
-def resourceTargets = ['META-INF/mods.toml', 'pack.mcmeta', "${mod_id}.mixins.json".toString()]
+def resourceTargets = ['META-INF/mods.toml', 'pack.mcmeta']
 def intoTargets = ["$rootDir/out/production/resources/", "$rootDir/out/production/${project.name}.main/", "$rootDir/bin/main/"]
 def replaceProperties = [mod_id: mod_id, mod_name: mod_name, mod_version: mod_version,
                          mod_authors: mod_authors, mod_description: mod_description,
@@ -216,29 +213,6 @@ jar {
                 'Implementation-Timestamp': new Date().format('yyyy-MM-dd\'T\'HH:mm:ssZ')
         ])
     }
-}
-
-def relocateTargets = ['dev._100media.capabilitysyncer']
-shadowJar {
-    archiveClassifier = ''
-    configurations = [project.configurations.shadow]
-    relocateTargets.forEach {
-        relocate it, "${project.group}.relocated.$it"
-    }
-    finalizedBy 'reobfShadowJar'
-}
-
-artifacts {
-    shadowJar
-}
-
-reobf {
-    shadowJar {}
-}
-
-afterEvaluate {
-    jar.finalizedBy 'reobfJar'
-    reobfShadowJar.dependsOn shadowJar
 }
 
 // Example configuration to allow publishing using the maven-publish plugin

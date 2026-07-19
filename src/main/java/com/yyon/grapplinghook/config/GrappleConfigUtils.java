@@ -1,5 +1,6 @@
 package com.yyon.grapplinghook.config;
 
+import com.yyon.grapplinghook.GrappleMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.enchantment.Enchantment.Rarity;
 import net.minecraft.world.level.block.Block;
@@ -35,19 +36,28 @@ public class GrappleConfigUtils {
 	    		modid = "minecraft";
 	    		name = str;
 	    	}
-	    	
-	    	Block b = ForgeRegistries.BLOCKS.getValue(new ResourceLocation(modid, name));
-	    	
-	    	blocks.add(b);
+
+	    	ResourceLocation loc = new ResourceLocation(modid, name);
+	    	if (!ForgeRegistries.BLOCKS.containsKey(loc)) {
+	    		GrappleMod.LOGGER.warn("Unknown block in grappling hook block list config: {}", str);
+	    		continue;
+	    	}
+
+	    	blocks.add(ForgeRegistries.BLOCKS.getValue(loc));
 	    }
 	    
 	    return blocks;
 	}
 	
 	public static void updateGrapplingBlocks() {
-		String s = GrappleConfig.getConf().grapplinghook.blocks.grapplingBlocks;
+		// record the raw config strings so attachesBlock/breaksBlock only re-parse when the config actually changes
+		prevGrapplingBlocks = GrappleConfig.getConf().grapplinghook.blocks.grapplingBlocks;
+		prevGrapplingNonBlocks = GrappleConfig.getConf().grapplinghook.blocks.grapplingNonBlocks;
+		prevGrapplingBreakBlocks = GrappleConfig.getConf().grapplinghook.blocks.grappleBreakBlocks;
+
+		String s = prevGrapplingBlocks;
 		if (s.equals("any") || s.equals("")) {
-			s = GrappleConfig.getConf().grapplinghook.blocks.grapplingNonBlocks;
+			s = prevGrapplingNonBlocks;
 			if (s.equals("none") || s.equals("")) {
 				anyBlocks = true;
 			} else {
@@ -58,14 +68,14 @@ public class GrappleConfigUtils {
 			anyBlocks = false;
 			removeBlocks = false;
 		}
-	
+
 		if (!anyBlocks) {
 			grapplingBlocks = stringToBlocks(s);
 		}
-		
-		grapplingBreaksBlocks = stringToBlocks(GrappleConfig.getConf().grapplinghook.blocks.grappleBreakBlocks);
+
+		grapplingBreaksBlocks = stringToBlocks(prevGrapplingBreakBlocks);
 		anyBreakBlocks = grapplingBreaksBlocks.size() != 0;
-		
+
 	}
 
 	private static String prevGrapplingBlocks = null;

@@ -71,9 +71,10 @@ public class GrappleController {
 		this.entity = world.getEntity(entityId);
 		this.motion = Vec.motionVec(entity);
 
-		// undo friction
+		// undo friction: use the actual position delta when it agrees with the reported motion
+		// (same sign, within a factor of 2) on every axis
 		Vec newmotion = new Vec(entity.position().x - entity.xOld, entity.position().y - entity.yOld, entity.position().z - entity.zOld);
-		if (newmotion.x/motion.x < 2 && motion.x/newmotion.x < 2 && newmotion.y/motion.y < 2 && motion.y/newmotion.y < 2 && newmotion.z/motion.z < 2 && motion.z/newmotion.z < 2) {
+		if (withinFactorTwo(newmotion.x, motion.x) && withinFactorTwo(newmotion.y, motion.y) && withinFactorTwo(newmotion.z, motion.z)) {
 			this.motion = newmotion;
 		}
 
@@ -92,6 +93,18 @@ public class GrappleController {
 		if (custom != null && custom.rocket) {
 			ClientProxyInterface.proxy.updateRocketRegen(custom.rocket_active_time, custom.rocket_refuel_ratio);
 		}
+	}
+
+	private static boolean withinFactorTwo(double a, double b) {
+		double absA = Math.abs(a);
+		double absB = Math.abs(b);
+		if (absA < 1e-9 && absB < 1e-9) {
+			return true;
+		}
+		if (a * b <= 0) {
+			return false;
+		}
+		return absA / absB < 2 && absB / absA < 2;
 	}
 
 	public void unattach() {
@@ -196,6 +209,21 @@ public class GrappleController {
 
 						if (motor) {
 							hookEntity.r = distToAnchor + oldspherevec.length();
+						}
+
+						// a hook on a moving ship can outrun the player: pay out rope (up to maxlen)
+						// instead of instantly snapping
+						if (hookEntity.getAttachedShipId() != -1
+								&& oldspherevec.length() - remaininglength > GrappleConfig.getConf().grapplinghook.other.rope_snap_buffer) {
+							double needed = distToAnchor + oldspherevec.length();
+							double cap = Math.max(this.maxLen, hookEntity.r);
+							double newR = Math.min(needed, cap);
+							if (newR > hookEntity.r) {
+								hookEntity.r = newR;
+								remaininglength = motor ? Math.max(this.custom.maxlen, hookEntity.r) - distToAnchor : hookEntity.r - distToAnchor;
+								spherevec = oldspherevec.changeLen(remaininglength);
+								spherechange = spherevec.sub(oldspherevec);
+							}
 						}
 
 						// snap to rope length
@@ -508,7 +536,7 @@ public class GrappleController {
 					if (Double.isNaN(newmotion.x) || Double.isNaN(newmotion.y) || Double.isNaN(newmotion.z)) {
 						newmotion = new Vec(0, 0, 0);
 						motion = new Vec(0, 0, 0);
-						System.out.println("error: motion is NaN");
+						GrappleMod.LOGGER.error("Grapple controller motion is NaN, resetting");
 					}
 
 					entity.setDeltaMovement(newmotion.x, newmotion.y, newmotion.z);
@@ -790,7 +818,7 @@ public class GrappleController {
 		if (this.grapplehookEntityIds.contains(hookid)) {
 			this.grapplehookEntityIds.remove(hookid);
 		} else {
-			System.out.println("Error: controller received hook detach, but hook id not in grapplehookEntityIds");
+			GrappleMod.LOGGER.warn("Controller received hook detach, but hook id not in grapplehookEntityIds");
 		}
 
 		GrapplehookEntity hookToRemove = null;
@@ -804,7 +832,7 @@ public class GrappleController {
 		if (hookToRemove != null) {
 			this.grapplehookEntities.remove(hookToRemove);
 		} else {
-			System.out.println("Error: controller received hook detach, but hook entity not in grapplehookEntities");
+			GrappleMod.LOGGER.warn("Controller received hook detach, but hook entity not in grapplehookEntities");
 		}
 	}
 

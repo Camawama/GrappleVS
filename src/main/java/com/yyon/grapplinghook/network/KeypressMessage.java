@@ -40,12 +40,12 @@ public class KeypressMessage extends BaseMessageServer {
     }
 
     public void decode(FriendlyByteBuf buf) {
-    	this.key = KeypressItem.Keys.values()[buf.readInt()];
+    	this.key = buf.readEnum(KeypressItem.Keys.class);
     	this.isDown = buf.readBoolean();
     }
 
     public void encode(FriendlyByteBuf buf) {
-    	buf.writeInt(this.key.ordinal());
+    	buf.writeEnum(this.key);
     	buf.writeBoolean(this.isDown);
     }
 

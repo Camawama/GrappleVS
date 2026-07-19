@@ -247,7 +247,7 @@ public class RenderGrapplehookEntity<T extends GrapplehookEntity> extends Entity
         		
         		double taut = 1;
         		if (i == segmenthandler.segments.size() - 2) {
-//        			taut = hookEntity.taut;
+        			taut = hookEntity.taut;
         		}
         		
         		drawSegment(from, to, taut, vertexbuffer, matrix4f1, matrix3f1, p_225623_6_);
@@ -358,13 +358,19 @@ public class RenderGrapplehookEntity<T extends GrapplehookEntity> extends Entity
 		return true;
 	}
 
+	private ItemStack cachedRenderStack = null;
+
 	public ItemStack getStackToRender(T entityIn)
     {
-		ItemStack stack = new ItemStack(this.item);
-		CompoundTag tag = stack.getOrCreateTag();
-		tag.putBoolean("hook", true);
-		stack.setTag(tag);
-        return stack;
+		// cached: this runs every frame per hook and the stack never changes
+		if (cachedRenderStack == null) {
+			ItemStack stack = new ItemStack(this.item);
+			CompoundTag tag = stack.getOrCreateTag();
+			tag.putBoolean("hook", true);
+			stack.setTag(tag);
+			cachedRenderStack = stack;
+		}
+        return cachedRenderStack;
     }
 
     /**
